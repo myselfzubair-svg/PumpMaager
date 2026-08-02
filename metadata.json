@@ -1,0 +1,6 @@
+{
+  "name": "Pump Audit Daily",
+  "description": "An offline-first petrol pump daily reconciliation and audit tracker with a live database admin viewer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
