@@ -38,6 +38,8 @@ object FirebasePhoneAuthManager {
 
             override fun onVerificationFailed(e: FirebaseException) {
                 Log.e(TAG, "onVerificationFailed: code=${e.message}", e)
+                Log.e(TAG, "Check if SHA-1/SHA-256 fingerprints are added to Firebase Console.")
+                Log.e(TAG, "Check if Phone Auth is enabled in Firebase Console.")
                 callbacks.onVerificationFailed(e)
             }
 

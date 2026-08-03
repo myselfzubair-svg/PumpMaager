@@ -22,9 +22,11 @@ class MyApplication : Application() {
                 )
                 Log.i("MyApplication", "Firebase App Check successfully initialized with Debug Provider.")
             } else {
+                // Initialize with Play Integrity
                 firebaseAppCheck.installAppCheckProviderFactory(
                     PlayIntegrityAppCheckProviderFactory.getInstance()
                 )
+                
                 Log.i("MyApplication", "Firebase App Check successfully initialized with Play Integrity Provider.")
             }
         } catch (e: Exception) {

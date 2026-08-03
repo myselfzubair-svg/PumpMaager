@@ -9,6 +9,25 @@
       "client_info": {
         "mobilesdk_app_id": "1:962806261205:android:5a99537af69a9ac771c95c",
         "android_client_info": {
+          "package_name": "com.aistudio.fieldscalculator.bzwqy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCO2XYSSZi2-P2rr8F-N2dsbwvRESgEpL8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:962806261205:android:1d6474b227b347b971c95c",
+        "android_client_info": {
           "package_name": "com.mypump.cal"
         }
       },

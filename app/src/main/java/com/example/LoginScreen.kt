@@ -513,33 +513,12 @@ fun LoginScreen(
                                     }
                                 } else {
                                     coroutineScope.launch(Dispatchers.Main) {
-                                        isLoading = false
-                                        val rawOwnerName = ownerName.trim()
-                                        val firstThree = if (rawOwnerName.length >= 3) rawOwnerName.take(3) else rawOwnerName
-                                        val lastSix = if (cleanedMobile.length >= 6) cleanedMobile.takeLast(6) else cleanedMobile
-                                        val generatedPassword = firstThree + lastSix
-                                        password = generatedPassword
-                                        confirmPassword = generatedPassword
-                                        pumpName = u
-                                        isPumpSetupActive = true
-                                        isOtpSent = false
-                                        Toast.makeText(context, "Registration starting: Please complete pump setup.", Toast.LENGTH_SHORT).show()
+                                        dispatchOtpFlow(formattedMobile, m)
                                     }
                                 }
                             }.onFailure { e ->
-                                // Let them register anyway (even if offline / firestore fails)
                                 coroutineScope.launch(Dispatchers.Main) {
-                                    isLoading = false
-                                    val rawOwnerName = ownerName.trim()
-                                    val firstThree = if (rawOwnerName.length >= 3) rawOwnerName.take(3) else rawOwnerName
-                                    val lastSix = if (cleanedMobile.length >= 6) cleanedMobile.takeLast(6) else cleanedMobile
-                                    val generatedPassword = firstThree + lastSix
-                                    password = generatedPassword
-                                    confirmPassword = generatedPassword
-                                    pumpName = u
-                                    isPumpSetupActive = true
-                                    isOtpSent = false
-                                    Toast.makeText(context, "Offline setup: Please complete pump setup.", Toast.LENGTH_SHORT).show()
+                                    dispatchOtpFlow(formattedMobile, m)
                                 }
                             }
                         }
@@ -1760,7 +1739,7 @@ fun LoginScreen(
 
                         // Toggle Login Method (Password vs OTP)
                         AnimatedVisibility(
-                            visible = false,
+                            visible = true,
                             enter = fadeIn(),
                             exit = fadeOut()
                         ) {
@@ -1911,7 +1890,7 @@ fun LoginScreen(
 
                         // SMS Dispatch Gateway (Real Firebase Auth vs Simulated Demo Mode)
                         AnimatedVisibility(
-                            visible = false,
+                            visible = true,
                             enter = fadeIn(),
                             exit = fadeOut()
                         ) {
