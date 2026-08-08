@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "ms_nozzle_readings")
 data class MsNozzleReading(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val ownerAdminPhone: String, // Multi-tenancy isolation
     val nozzleLabel: String,
     val openingReading: Double,
     val closingReading: Double,

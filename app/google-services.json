@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "962806261205",
-    "project_id": "pumpmanager-2908f",
-    "storage_bucket": "pumpmanager-2908f.firebasestorage.app"
+    "project_number": "985120822522",
+    "project_id": "my-fuel-audit",
+    "storage_bucket": "my-fuel-audit.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:962806261205:android:5a99537af69a9ac771c95c",
+        "mobilesdk_app_id": "1:985120822522:android:5bdf16e348a83c21e2e543",
         "android_client_info": {
-          "package_name": "com.aistudio.fieldscalculator.bzwqy"
+          "package_name": "com.drinamdarp.ManagePumpCalc"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCO2XYSSZi2-P2rr8F-N2dsbwvRESgEpL8"
+          "current_key": "AIzaSyCp6oNE7xhiGW81hDZMvgWB-EEZPIHCffE"
         }
       ],
       "services": {
@@ -26,7 +26,7 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:962806261205:android:1d6474b227b347b971c95c",
+        "mobilesdk_app_id": "1:985120822522:android:83acfd4c25583c99e2e543",
         "android_client_info": {
           "package_name": "com.mypump.cal"
         }
@@ -34,7 +34,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCO2XYSSZi2-P2rr8F-N2dsbwvRESgEpL8"
+          "current_key": "AIzaSyCp6oNE7xhiGW81hDZMvgWB-EEZPIHCffE"
         }
       ],
       "services": {

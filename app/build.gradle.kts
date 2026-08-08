@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  id("kotlin-parcelize")
 }
 
 android {
@@ -15,19 +18,24 @@ android {
     applicationId = "com.mypump.cal"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 4
+    versionName = "1.0.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val keystoreProperties = Properties()
+    if (keystorePropertiesFile.exists()) {
+      keystoreProperties.load(keystorePropertiesFile.inputStream())
+    }
+
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD") ?: "mypump123"
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD") ?: "mypump123"
+      storeFile = keystoreProperties["storeFile"]?.let { file(it.toString()) }
+      storePassword = keystoreProperties["storePassword"]?.toString()
+      keyAlias = keystoreProperties["keyAlias"]?.toString()
+      keyPassword = keystoreProperties["keyPassword"]?.toString()
     }
   }
 

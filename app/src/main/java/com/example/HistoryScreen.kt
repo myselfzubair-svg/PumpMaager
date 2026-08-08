@@ -36,6 +36,7 @@ import com.example.database.SavedAudit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
+    adminPhone: String,
     onBack: () -> Unit,
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -43,6 +44,11 @@ fun HistoryScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(adminPhone) {
+        viewModel.setAdminPhone(adminPhone)
+    }
+
     val audits by viewModel.allAudits.collectAsStateWithLifecycle()
 
     var selectedAudit by remember { mutableStateOf<SavedAudit?>(null) }
@@ -274,7 +280,7 @@ fun HistoryScreen(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(filteredAudits, key = { it.id }) { audit ->
+                            items(filteredAudits, key = { it.timestamp }) { audit ->
                                 AuditHistoryCard(
                                     audit = audit,
                                     onView = { selectedAudit = audit },
@@ -400,7 +406,7 @@ fun HistoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteAudit(audit.id)
+                        viewModel.deleteAudit(adminPhone, audit.date, audit.caName, audit.timestamp)
                         auditToDelete = null
                         Toast.makeText(context, "Report deleted successfully", Toast.LENGTH_SHORT).show()
                     },
@@ -433,7 +439,7 @@ fun HistoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.clearAll()
+                        viewModel.clearAll(adminPhone)
                         showDeleteConfirmAll = false
                         Toast.makeText(context, "All records deleted", Toast.LENGTH_SHORT).show()
                     },
@@ -552,7 +558,7 @@ fun AuditHistoryCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("history_card_${audit.id}"),
+            .testTag("history_card_${audit.timestamp}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)

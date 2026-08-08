@@ -2,11 +2,7 @@ package com.example
 
 import android.content.Context
 import android.content.Intent
-import android.os.CancellationSignal
-import android.os.ParcelFileDescriptor
-import android.print.PageRange
 import android.print.PrintAttributes
-import android.print.PrintDocumentAdapter
 import android.print.PrintManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -25,16 +21,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalGasStation
-import androidx.compose.material.icons.filled.Print
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Share
 import androidx.core.content.FileProvider
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,22 +53,46 @@ import java.util.*
 @Composable
 fun DailySalesReportScreen(
     onBack: () -> Unit,
+    adminPhone: String = "",
     onLogout: () -> Unit = {},
     historyViewModel: HistoryViewModel = viewModel(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val sharedPrefs = remember { context.getSharedPreferences("pump_manager_prefs", Context.MODE_PRIVATE) }
 
-    // Selected Month & Year (0-based for Month, e.g. 0 = January, 6 = July)
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            historyViewModel.setAdminPhone(adminPhone)
+        }
+    }
+
+    // Selected Month & Year
     val calendar = Calendar.getInstance()
     var selectedMonth by rememberSaveable { mutableStateOf(calendar.get(Calendar.MONTH)) }
     var selectedYear by rememberSaveable { mutableStateOf(calendar.get(Calendar.YEAR)) }
 
+    // Fetch all daily configs from Cloud
+    var allDailyConfigs by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            allDailyConfigs = com.example.database.FirestoreRepository.getAllDailyConfigs(adminPhone)
+        }
+    }
+
     // Fetch all nozzle readings from DB to aggregate dynamically
-    val allMsReadings by historyViewModel.allMsNozzleReadings.collectAsState(initial = emptyList())
-    val allHsdReadings by historyViewModel.allHsdNozzleReadings.collectAsState(initial = emptyList())
-    val allAudits by historyViewModel.allAudits.collectAsState(initial = emptyList())
+    val allMsReadings: List<MsNozzleReading> by historyViewModel.allMsNozzleReadings.collectAsState(initial = emptyList())
+    val allHsdReadings: List<HsdNozzleReading> by historyViewModel.allHsdNozzleReadings.collectAsState(initial = emptyList())
+    val allGeneralReadings: List<com.example.database.GeneralNozzleReading> by historyViewModel.allGeneralNozzleReadings.collectAsState(initial = emptyList())
+    val allAudits: List<com.example.database.SavedAudit> by historyViewModel.allAudits.collectAsState(initial = emptyList())
+
+    // Products to display
+    var stationProducts by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            val pumpInfo = com.example.database.FirestoreRepository.getPumpInfo(adminPhone)
+            stationProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() } ?: listOf("MS", "HSD")
+        }
+    }
 
     // Generate days list for the selected month
     val daysInMonthList = remember(selectedMonth, selectedYear) {
@@ -88,108 +106,94 @@ fun DailySalesReportScreen(
     }
 
     // Build dataset for each day of the month
-    val dailyDataList = remember(daysInMonthList, allMsReadings, allHsdReadings, allAudits) {
+    val dailyDataList = remember(daysInMonthList, allMsReadings, allHsdReadings, allGeneralReadings, allAudits, allDailyConfigs, stationProducts) {
         daysInMonthList.map { dateStr ->
-            // Filter nozzle readings for this specific day
-            val msDayReadings = allMsReadings.filter { it.date == dateStr }
-            val hsdDayReadings = allHsdReadings.filter { it.date == dateStr }
-
-            // Filter saved audits for this specific day to extract cash totals
             val dayAudits = allAudits.filter { it.date == dateStr }
             val dayCashSubmitted = dayAudits.sumOf { it.cashSubmitted }
             val dayActualCashCollected = dayAudits.sumOf { it.actualCashCollected }
             val dayTotalCashCollected = dayCashSubmitted + dayActualCashCollected
 
-            // Aggregate MS sales & testing
-            var msSalesLitres = 0.0
-            var msTestingLitres = 0.0
-            val msNozzleDetailsList = mutableListOf<NozzleDailyDetail>()
+            val productDataList = stationProducts.map { product ->
+                // Filter all sources of nozzle readings
+                val legacyReadings = if (isSameProduct(product, "MS")) {
+                    allMsReadings.filter { it.date == dateStr }
+                } else if (isSameProduct(product, "HSD")) {
+                    allHsdReadings.filter { it.date == dateStr }
+                } else emptyList<Any>()
 
-            if (msDayReadings.isNotEmpty()) {
-                msDayReadings.groupBy { it.nozzleLabel }.forEach { (label, readings) ->
-                    val sorted = readings.sortedBy { it.timestamp }
-                    val firstOp = sorted.firstOrNull()?.openingReading ?: 0.0
-                    val lastCl = sorted.lastOrNull()?.closingReading ?: 0.0
-                    val nozzleTesting = sorted.sumOf { it.testing }
-                    val netSales = lastCl - firstOp
-                    msSalesLitres += netSales
-                    msTestingLitres += nozzleTesting
-                    msNozzleDetailsList.add(NozzleDailyDetail(label, "MS", firstOp, lastCl, nozzleTesting, netSales))
+                val genReadings = allGeneralReadings.filter { it.date == dateStr && isSameProduct(it.productName, product) }
+                
+                // Aggregate sales & testing
+                val nozzleAggregator = mutableMapOf<String, MutableList<Pair<Double, Double>>>() // label -> list of (opening, closing)
+                val testingMap = mutableMapOf<String, Double>() // label -> total testing
+
+                // Process General Readings
+                genReadings.groupBy { it.nozzleLabel }.forEach { (label, readings) ->
+                    nozzleAggregator.getOrPut(label) { mutableListOf() }.addAll(readings.map { it.openingReading to it.closingReading })
+                    testingMap[label] = (testingMap[label] ?: 0.0) + readings.sumOf { it.testing }
                 }
-            }
 
-            // Aggregate HSD sales & testing
-            var hsdSalesLitres = 0.0
-            var hsdTestingLitres = 0.0
-            val hsdNozzleDetailsList = mutableListOf<NozzleDailyDetail>()
-
-            if (hsdDayReadings.isNotEmpty()) {
-                hsdDayReadings.groupBy { it.nozzleLabel }.forEach { (label, readings) ->
-                    val sorted = readings.sortedBy { it.timestamp }
-                    val firstOp = sorted.firstOrNull()?.openingReading ?: 0.0
-                    val lastCl = sorted.lastOrNull()?.closingReading ?: 0.0
-                    val nozzleTesting = sorted.sumOf { it.testing }
-                    val netSales = lastCl - firstOp
-                    hsdSalesLitres += netSales
-                    hsdTestingLitres += nozzleTesting
-                    hsdNozzleDetailsList.add(NozzleDailyDetail(label, "HSD", firstOp, lastCl, nozzleTesting, netSales))
+                // Process Legacy Readings (Combine all recorded data)
+                legacyReadings.forEach { r ->
+                    val label = if (r is MsNozzleReading) r.nozzleLabel else (r as HsdNozzleReading).nozzleLabel
+                    val readings = if (r is MsNozzleReading) r.openingReading to r.closingReading else (r as HsdNozzleReading).openingReading to (r as HsdNozzleReading).closingReading
+                    val testing = if (r is MsNozzleReading) r.testing else (r as HsdNozzleReading).testing
+                    
+                    nozzleAggregator.getOrPut(label) { mutableListOf() }.add(readings)
+                    testingMap[label] = (testingMap[label] ?: 0.0) + testing
                 }
+
+                var productSalesLitres = 0.0
+                var productTestingLitres = 0.0
+                var productTotalOpening = 0.0
+                var productTotalClosing = 0.0
+                val productNozzleDetailsList = mutableListOf<NozzleDailyDetail>()
+
+                nozzleAggregator.forEach { (label, readings) ->
+                    val sorted = readings.sortedBy { it.first }
+                    val firstOp = sorted.firstOrNull()?.first ?: 0.0
+                    val lastCl = sorted.lastOrNull()?.second ?: 0.0
+                    val nozzleTesting = testingMap[label] ?: 0.0
+                    val netSales = (lastCl - firstOp).coerceAtLeast(0.0)
+                    productSalesLitres += netSales
+                    productTestingLitres += nozzleTesting
+                    productTotalOpening += firstOp
+                    productTotalClosing += lastCl
+                    productNozzleDetailsList.add(NozzleDailyDetail(label, product, firstOp, lastCl, nozzleTesting, netSales))
+                }
+
+                val dayConfig = allDailyConfigs[dateStr] ?: emptyMap()
+                val rate = dayConfig["rate_${product.lowercase().replace(" ", "_")}"]?.toDoubleOrNull() 
+                    ?: if (isSameProduct(product, "MS")) dayConfig["rate_ms"]?.toDoubleOrNull() ?: 0.0
+                       else if (isSameProduct(product, "HSD")) dayConfig["rate_hsd"]?.toDoubleOrNull() ?: 0.0
+                       else 0.0
+                val stock = dayConfig["stock_${product.lowercase().replace(" ", "_")}"]?.toDoubleOrNull()
+                    ?: if (isSameProduct(product, "MS")) dayConfig["stock_ms"]?.toDoubleOrNull() ?: 0.0
+                       else if (isSameProduct(product, "HSD")) dayConfig["stock_hsd"]?.toDoubleOrNull() ?: 0.0
+                       else 0.0
+
+                ProductDayData(
+                    productName = product,
+                    rate = rate,
+                    openingStock = stock,
+                    totalOpening = productTotalOpening,
+                    totalClosing = productTotalClosing,
+                    salesLitres = productSalesLitres,
+                    testingLitres = productTestingLitres,
+                    salesAmount = productSalesLitres * rate,
+                    nozzleDetails = productNozzleDetailsList
+                )
             }
-
-            // Retrieve Manager configurations from shared preferences
-            val rateMsStr = sharedPrefs.getString("rate_ms_$dateStr", "") ?: ""
-            val rateHsdStr = sharedPrefs.getString("rate_hsd_$dateStr", "") ?: ""
-            val stockMsStr = sharedPrefs.getString("stock_ms_$dateStr", "") ?: ""
-            val stockHsdStr = sharedPrefs.getString("stock_hsd_$dateStr", "") ?: ""
-            val receiptMsStr = sharedPrefs.getString("receipt_ms_$dateStr", "") ?: ""
-            val receiptHsdStr = sharedPrefs.getString("receipt_hsd_$dateStr", "") ?: ""
-
-            val rateMs = rateMsStr.toDoubleOrNull() ?: 0.0
-            val rateHsd = rateHsdStr.toDoubleOrNull() ?: 0.0
-            val stockMs = stockMsStr.toDoubleOrNull() ?: 0.0
-            val stockHsd = stockHsdStr.toDoubleOrNull() ?: 0.0
-            val receiptMs = receiptMsStr.toDoubleOrNull() ?: 0.0
-            val receiptHsd = receiptHsdStr.toDoubleOrNull() ?: 0.0
-
-            val totalStockMs = stockMs + receiptMs
-            val totalStockHsd = stockHsd + receiptHsd
-
-            val totalMsSalesAmount = msSalesLitres * rateMs
-            val totalHsdSalesAmount = hsdSalesLitres * rateHsd
 
             DailySalesReportData(
                 date = dateStr,
-                msRate = rateMs,
-                hsdRate = rateHsd,
-                msOpeningStock = stockMs,
-                hsdOpeningStock = stockHsd,
-                msNewInventory = receiptMs,
-                hsdNewInventory = receiptHsd,
-                msTotalStock = totalStockMs,
-                hsdTotalStock = totalStockHsd,
-                msSalesLitres = msSalesLitres,
-                hsdSalesLitres = hsdSalesLitres,
-                msTestingLitres = msTestingLitres,
-                hsdTestingLitres = hsdTestingLitres,
-                msSalesAmount = totalMsSalesAmount,
-                hsdSalesAmount = totalHsdSalesAmount,
-                nozzlesList = (msNozzleDetailsList + hsdNozzleDetailsList).sortedBy { it.label },
+                products = productDataList,
                 cashSubmitted = dayCashSubmitted,
                 actualCashCollected = dayActualCashCollected,
                 totalCashCollected = dayTotalCashCollected
             )
         }
     }
-
-    // Monthly summation metrics
-    val monthlyMsSalesLitres = dailyDataList.sumOf { it.msSalesLitres }
-    val monthlyHsdSalesLitres = dailyDataList.sumOf { it.hsdSalesLitres }
-    val monthlyMsSalesAmount = dailyDataList.sumOf { it.msSalesAmount }
-    val monthlyHsdSalesAmount = dailyDataList.sumOf { it.hsdSalesAmount }
-    val monthlyTotalSalesAmount = monthlyMsSalesAmount + monthlyHsdSalesAmount
-    val monthlyCashSubmitted = dailyDataList.sumOf { it.cashSubmitted }
-    val monthlyActualCashCollected = dailyDataList.sumOf { it.actualCashCollected }
-    val monthlyTotalCashCollected = dailyDataList.sumOf { it.totalCashCollected }
 
     // Expandable item map for days
     val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
@@ -236,14 +240,6 @@ fun DailySalesReportScreen(
                                 selectedMonthName,
                                 selectedYear,
                                 dailyDataList,
-                                monthlyMsSalesLitres,
-                                monthlyHsdSalesLitres,
-                                monthlyMsSalesAmount,
-                                monthlyHsdSalesAmount,
-                                monthlyTotalSalesAmount,
-                                totalCashSubmitted = monthlyCashSubmitted,
-                                totalActualCashCollected = monthlyActualCashCollected,
-                                totalCashCollected = monthlyTotalCashCollected,
                                 isShare = true
                             )
                         },
@@ -361,65 +357,47 @@ fun DailySalesReportScreen(
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // MS Summary Column
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                )
+                        // Grid of products
+                        stationProducts.chunked(2).forEach { rowProducts ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = LanguageManager.translate("MS (Petrol)", "एमएस (पेट्रोल)"),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "${String.format(Locale.getDefault(), "%,.1f", monthlyMsSalesLitres)} L",
-                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                    Text(
-                                        text = "₹${String.format(Locale.getDefault(), "%,.2f", monthlyMsSalesAmount)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                rowProducts.forEach { product ->
+                                    val totalLitres = dailyDataList.sumOf { day -> day.products.find { it.productName == product }?.salesLitres ?: 0.0 }
+                                    val totalAmount = dailyDataList.sumOf { day -> day.products.find { it.productName == product }?.salesAmount ?: 0.0 }
+                                    
+                                    Card(
+                                        modifier = Modifier.weight(1f),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text(
+                                                text = product,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L",
+                                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Text(
+                                                text = "₹${String.format(Locale.getDefault(), "%,.2f", totalAmount)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
                                 }
-                            }
-
-                            // HSD Summary Column
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                )
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = LanguageManager.translate("HSD (Diesel)", "एचएसडी (डीजल)"),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFF2E7D32)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "${String.format(Locale.getDefault(), "%,.1f", monthlyHsdSalesLitres)} L",
-                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                    Text(
-                                        text = "₹${String.format(Locale.getDefault(), "%,.2f", monthlyHsdSalesAmount)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                if (rowProducts.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
-                        Divider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Row(
@@ -432,8 +410,9 @@ fun DailySalesReportScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val totalSalesVal = dailyDataList.sumOf { day -> day.products.sumOf { it.salesAmount } }
                             Text(
-                                text = "₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalSalesAmount)}",
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", totalSalesVal)}",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -451,8 +430,9 @@ fun DailySalesReportScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val totalCashVal = dailyDataList.sumOf { it.totalCashCollected }
                             Text(
-                                text = "₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashCollected)}",
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", totalCashVal)}",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.secondary
                             )
@@ -516,30 +496,30 @@ fun DailySalesReportScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "MS: ${String.format(Locale.getDefault(), "%,.1f", dailyData.msSalesLitres)} L",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "|",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                    )
-                                    Text(
-                                        text = "HSD: ${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdSalesLitres)} L",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    dailyData.products.take(3).forEachIndexed { index, product ->
+                                        Text(
+                                            text = "${product.productName.take(3)}: ${String.format(Locale.getDefault(), "%,.1f", product.salesLitres)} L",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (index < dailyData.products.size - 1 && index < 2) {
+                                            Text(
+                                                text = "|",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.msSalesAmount + dailyData.hsdSalesAmount)}",
+                                    text = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.products.sumOf { it.salesAmount })}",
                                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -564,47 +544,34 @@ fun DailySalesReportScreen(
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
 
-                                // Dual Pane (MS on Left, HSD on Right)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    // MS Details Panel
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = LanguageManager.translate("MS Petrol (Petrol)", "एमएस पेट्रोल (पेट्रोल)"),
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(bottom = 6.dp)
-                                        )
+                                // Grid of Product Details
+                                dailyData.products.chunked(2).forEach { productPair ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        productPair.forEach { product ->
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = product.productName,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(bottom = 6.dp)
+                                                )
 
-                                        DetailRow(LanguageManager.translate("Opening Stock", "प्रारंभिक स्टॉक"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.msOpeningStock)} L")
-                                        DetailRow(LanguageManager.translate("New Inventory", "नई इन्वेंट्री"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.msNewInventory)} L")
-                                        DetailRow(LanguageManager.translate("Total Stock", "कुल स्टॉक"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.msTotalStock)} L", isBold = true)
-                                        DetailRow(LanguageManager.translate("Rate/Litre", "दर/लीटर"), "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.msRate)}")
-                                        DetailRow(LanguageManager.translate("Net Sales", "कुल बिक्री"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.msSalesLitres)} L")
-                                        DetailRow(LanguageManager.translate("Testing Total", "परीक्षण कुल"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.msTestingLitres)} L", color = Color(0xFFC62828))
-                                        DetailRow(LanguageManager.translate("Sales Amount", "बिक्री मूल्य"), "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.msSalesAmount)}", isPrimary = true)
-                                    }
-
-                                    // HSD Details Panel
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = LanguageManager.translate("HSD Diesel (Diesel)", "एचएसडी डीजल (डीजल)"),
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = Color(0xFF2E7D32),
-                                            modifier = Modifier.padding(bottom = 6.dp)
-                                        )
-
-                                        DetailRow(LanguageManager.translate("Opening Stock", "प्रारंभिक स्टॉक"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdOpeningStock)} L")
-                                        DetailRow(LanguageManager.translate("New Inventory", "नई इन्वेंट्री"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdNewInventory)} L")
-                                        DetailRow(LanguageManager.translate("Total Stock", "कुल स्टॉक"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdTotalStock)} L", isBold = true)
-                                        DetailRow(LanguageManager.translate("Rate/Litre", "दर/लीटर"), "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.hsdRate)}")
-                                        DetailRow(LanguageManager.translate("Net Sales", "कुल बिक्री"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdSalesLitres)} L")
-                                        DetailRow(LanguageManager.translate("Testing Total", "परीक्षण कुल"), "${String.format(Locale.getDefault(), "%,.1f", dailyData.hsdTestingLitres)} L", color = Color(0xFFC62828))
-                                        DetailRow(LanguageManager.translate("Sales Amount", "बिक्री मूल्य"), "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.hsdSalesAmount)}", isPrimary = true)
+                                                DetailRow("Total Nozzles", "${product.nozzleDetails.size}", isBold = true)
+                                                DetailRow("Opening Reading", String.format(Locale.getDefault(), "%,.1f", product.totalOpening))
+                                                DetailRow("Closing Reading", String.format(Locale.getDefault(), "%,.1f", product.totalClosing))
+                                                DetailRow("Net Sales Qty", "${String.format(Locale.getDefault(), "%,.1f", product.salesLitres)} L")
+                                                DetailRow("Rate/Litre", "₹${String.format(Locale.getDefault(), "%,.2f", product.rate)}")
+                                                DetailRow("Sales Amount", "₹${String.format(Locale.getDefault(), "%,.2f", product.salesAmount)}", isPrimary = true)
+                                            }
+                                        }
+                                        if (productPair.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
                                     }
                                 }
 
@@ -632,7 +599,7 @@ fun DailySalesReportScreen(
                                             label = LanguageManager.translate("Actual Cash Collected (₹)", "वास्तविक नकद संग्रह (₹)"),
                                             value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.actualCashCollected)}"
                                         )
-                                        Divider(
+                                        HorizontalDivider(
                                             modifier = Modifier.padding(vertical = 4.dp),
                                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
                                         )
@@ -656,7 +623,8 @@ fun DailySalesReportScreen(
                                 }
 
                                 // Nozzle Readings Breakdown (Table style)
-                                if (dailyData.nozzlesList.isNotEmpty()) {
+                                val allNozzles = dailyData.products.flatMap { it.nozzleDetails }
+                                if (allNozzles.isNotEmpty()) {
                                     Column {
                                         Text(
                                             text = LanguageManager.translate("Nozzle Readings Breakdown", "नोजल रीडिंग विश्लेषण"),
@@ -680,10 +648,10 @@ fun DailySalesReportScreen(
                                                     Text(LanguageManager.translate("Net L", "नेट"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
+                                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
                                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                                dailyData.nozzlesList.forEach { nozzle ->
+                                                allNozzles.forEach { nozzle ->
                                                     Row(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -692,10 +660,10 @@ fun DailySalesReportScreen(
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text(
-                                                            text = "${nozzle.label} (${nozzle.type})",
+                                                            text = "${nozzle.label} (${nozzle.type.take(3)})",
                                                             modifier = Modifier.weight(1.5f),
                                                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                                            color = if (nozzle.type == "MS") MaterialTheme.colorScheme.primary else Color(0xFF2E7D32)
+                                                            color = MaterialTheme.colorScheme.primary
                                                         )
                                                         Text(
                                                             text = String.format(Locale.getDefault(), "%,.1f", nozzle.opening),
@@ -770,29 +738,27 @@ private fun DetailRow(
 // Data models used specifically for daily report
 data class DailySalesReportData(
     val date: String,
-    val msRate: Double,
-    val hsdRate: Double,
-    val msOpeningStock: Double,
-    val hsdOpeningStock: Double,
-    val msNewInventory: Double,
-    val hsdNewInventory: Double,
-    val msTotalStock: Double,
-    val hsdTotalStock: Double,
-    val msSalesLitres: Double,
-    val hsdSalesLitres: Double,
-    val msTestingLitres: Double,
-    val hsdTestingLitres: Double,
-    val msSalesAmount: Double,
-    val hsdSalesAmount: Double,
-    val nozzlesList: List<NozzleDailyDetail>,
+    val products: List<ProductDayData>,
     val cashSubmitted: Double = 0.0,
     val actualCashCollected: Double = 0.0,
     val totalCashCollected: Double = 0.0
 )
 
+data class ProductDayData(
+    val productName: String,
+    val rate: Double,
+    val openingStock: Double,
+    val totalOpening: Double = 0.0,
+    val totalClosing: Double = 0.0,
+    val salesLitres: Double,
+    val testingLitres: Double,
+    val salesAmount: Double,
+    val nozzleDetails: List<NozzleDailyDetail>
+)
+
 data class NozzleDailyDetail(
     val label: String,
-    val type: String, // "MS" or "HSD"
+    val type: String, // Product name
     val opening: Double,
     val closing: Double,
     val testing: Double,
@@ -804,44 +770,16 @@ private fun printMonthlySalesReportPdf(
     monthName: String,
     year: Int,
     dailyRecords: List<DailySalesReportData>,
-    totalMsLitres: Double,
-    totalHsdLitres: Double,
-    totalMsAmt: Double,
-    totalHsdAmt: Double,
-    totalAmt: Double,
-    totalCashSubmitted: Double = 0.0,
-    totalActualCashCollected: Double = 0.0,
-    totalCashCollected: Double = 0.0,
     isShare: Boolean = false
 ) {
-    val msNozzleLabels = dailyRecords.flatMap { rec ->
-        rec.nozzlesList.filter { it.type == "MS" }.map { it.label }
-    }.distinct().sorted()
-
-    val hsdNozzleLabels = dailyRecords.flatMap { rec ->
-        rec.nozzlesList.filter { it.type == "HSD" }.map { it.label }
-    }.distinct().sorted()
-
     val webView = WebView(context)
     val htmlBuilder = StringBuilder()
 
-    val msNozzleHeaderHtml = if (msNozzleLabels.isNotEmpty()) {
-        val widthPerNozzle = 25.0 / msNozzleLabels.size
-        msNozzleLabels.joinToString("") { label ->
-            """<th style="width: ${String.format(Locale.US, "%.2f", widthPerNozzle)}%; text-align: right;">$label (Op)</th>"""
-        }
-    } else {
-        """<th style="width: 25%;">Nozzle Opening Readings</th>"""
-    }
-
-    val hsdNozzleHeaderHtml = if (hsdNozzleLabels.isNotEmpty()) {
-        val widthPerNozzle = 25.0 / hsdNozzleLabels.size
-        hsdNozzleLabels.joinToString("") { label ->
-            """<th style="width: ${String.format(Locale.US, "%.2f", widthPerNozzle)}%; text-align: right;">$label (Op)</th>"""
-        }
-    } else {
-        """<th style="width: 25%;">Nozzle Opening Readings</th>"""
-    }
+    // Get all unique products present in the records
+    val allProducts = dailyRecords.flatMap { day -> day.products.map { it.productName } }.distinct()
+    val monthlyTotalCashSubmitted = dailyRecords.sumOf { it.cashSubmitted }
+    val monthlyTotalActualCashCollected = dailyRecords.sumOf { it.actualCashCollected }
+    val monthlyTotalCashCollected = dailyRecords.sumOf { it.totalCashCollected }
 
     htmlBuilder.append("""
         <!DOCTYPE html>
@@ -891,10 +829,6 @@ private fun printMonthlySalesReportPdf(
                     border-bottom: 2px solid #1a5f7a;
                     padding-bottom: 1px;
                 }
-                .hsd-title-sect {
-                    color: #2d6a4f;
-                    border-bottom: 2px solid #2d6a4f;
-                }
                 table {
                     width: 100%;
                     border-collapse: collapse;
@@ -917,25 +851,6 @@ private fun printMonthlySalesReportPdf(
                     font-family: 'Courier New', Courier, monospace;
                     font-size: 8px;
                 }
-                .ms-col {
-                    color: #1a5f7a;
-                    background-color: #f7fcfe;
-                }
-                .hsd-col {
-                    color: #2d6a4f;
-                    background-color: #f5faf6;
-                }
-                .nozzle-cell {
-                    font-size: 7px;
-                    line-height: 1.1;
-                }
-                .nozzle-item {
-                    border-bottom: 1px dashed #ddd;
-                    padding: 1px 0;
-                }
-                .nozzle-item:last-child {
-                    border-bottom: none;
-                }
                 .total-row {
                     font-weight: bold;
                     background-color: #eee;
@@ -943,143 +858,161 @@ private fun printMonthlySalesReportPdf(
             </style>
         </head>
         <body>
-            <!-- SHEET 1: MS PETROL -->
+    """.trimIndent())
+
+    // Generate a sheet for each product
+    allProducts.forEach { product ->
+        val productNozzleLabels = dailyRecords.flatMap { rec ->
+            rec.products.find { it.productName == product }?.nozzleDetails?.map { it.label } ?: emptyList()
+        }.distinct().sorted()
+
+        val nozzleHeaderHtml = if (productNozzleLabels.isNotEmpty()) {
+            val widthPerNozzle = 25.0 / productNozzleLabels.size
+            productNozzleLabels.joinToString("") { label ->
+                """<th style="width: ${String.format(Locale.US, "%.2f", widthPerNozzle)}%; text-align: right;">$label (Op)</th>"""
+            }
+        } else {
+            """<th style="width: 25%;">Nozzle Opening Readings</th>"""
+        }
+
+        htmlBuilder.append("""
             <div class="page">
                 <div class="header">
                     <h1>D R INAMDAR PETROLEUM</h1>
                     <p>Monthly Daily Sales & Stock Report &mdash; <strong>$monthName $year</strong></p>
-                    <p>Generated on: ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.getDefault()).format(Date())}</p>
+                    <p>Product: <strong>$product</strong> | Generated on: ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.getDefault()).format(Date())}</p>
                 </div>
                 
-                <div class="title-sect">MS PETROL (PETROL) &mdash; DAILY SALES & STOCK SHEET</div>
+                <div class="title-sect">$product &mdash; DAILY SALES & STOCK SHEET</div>
                 
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 8%;">Date</th>
-                            <th style="width: 10%; text-align: right;">Op Stock (L)</th>
-                            <th style="width: 10%; text-align: right;">Receipts (L)</th>
-                            <th style="width: 10%; text-align: right;">Total Stock (L)</th>
-                            $msNozzleHeaderHtml
+                            <th style="width: 10%;">Date</th>
+                            <th style="width: 10%; text-align: right;">Total Opening</th>
+                            <th style="width: 10%; text-align: right;">Total Closing</th>
+                            $nozzleHeaderHtml
                             <th style="width: 10%; text-align: right;">Sales (L)</th>
                             <th style="width: 8%; text-align: right;">Test (L)</th>
                             <th style="width: 8%; text-align: right;">Rate (₹)</th>
-                            <th style="width: 11%; text-align: right;">Amount (₹)</th>
+                            <th style="width: 12%; text-align: right;">Amount (₹)</th>
                         </tr>
                     </thead>
                     <tbody>
-    """.trimIndent())
+        """.trimIndent())
 
-    dailyRecords.forEach { rec ->
-        val msNozzles = rec.nozzlesList.filter { it.type == "MS" }
-        val nozzleCellsHtml = if (msNozzleLabels.isNotEmpty()) {
-            msNozzleLabels.joinToString("") { label ->
-                val noz = msNozzles.firstOrNull { it.label == label }
-                val valueStr = if (noz != null) String.format(Locale.getDefault(), "%,.1f", noz.opening) else "--"
-                """<td class="num">$valueStr</td>"""
+        var totalLitres = 0.0
+        var totalAmt = 0.0
+
+        dailyRecords.forEach { rec ->
+            val pData = rec.products.find { it.productName == product }
+            val nozzleCellsHtml = if (productNozzleLabels.isNotEmpty()) {
+                productNozzleLabels.joinToString("") { label ->
+                    val noz = pData?.nozzleDetails?.find { it.label == label }
+                    val valueStr = if (noz != null) String.format(Locale.getDefault(), "%,.1f", noz.opening) else "--"
+                    """<td class="num">$valueStr</td>"""
+                }
+            } else {
+                """<td class="nozzle-cell">--</td>"""
             }
-        } else {
-            """<td class="nozzle-cell">--</td>"""
+
+            if (pData != null) {
+                totalLitres += pData.salesLitres
+                totalAmt += pData.salesAmount
+                htmlBuilder.append("""
+                    <tr>
+                        <td><strong>${rec.date}</strong></td>
+                        <td class="num">${formatDouble(pData.totalOpening)}</td>
+                        <td class="num">${formatDouble(pData.totalClosing)}</td>
+                        $nozzleCellsHtml
+                        <td class="num" style="font-weight:bold;">${if (pData.salesLitres > 0) String.format(Locale.getDefault(), "%,.1f", pData.salesLitres) else "--"}</td>
+                        <td class="num" style="color:#c62828;">${if (pData.testingLitres > 0) String.format(Locale.getDefault(), "%,.1f", pData.testingLitres) else "--"}</td>
+                        <td class="num">${if (pData.rate > 0) String.format(Locale.getDefault(), "%,.2f", pData.rate) else "--"}</td>
+                        <td class="num" style="font-weight:bold;">${if (pData.salesAmount > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", pData.salesAmount) else "--"}</td>
+                    </tr>
+                """.trimIndent())
+            } else {
+                val emptyNozzleCells = "<td>--</td>".repeat(productNozzleLabels.size.coerceAtLeast(1))
+                htmlBuilder.append("""
+                    <tr>
+                        <td><strong>${rec.date}</strong></td>
+                        <td>--</td>
+                        $emptyNozzleCells
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                    </tr>
+                """.trimIndent())
+            }
         }
 
+        val colSpan = if (productNozzleLabels.isNotEmpty()) 3 + productNozzleLabels.size else 4
         htmlBuilder.append("""
-            <tr>
-                <td><strong>${rec.date}</strong></td>
-                <td class="num">${if (rec.msOpeningStock > 0) String.format(Locale.getDefault(), "%,.1f", rec.msOpeningStock) else "--"}</td>
-                <td class="num">${if (rec.msNewInventory > 0) String.format(Locale.getDefault(), "%,.1f", rec.msNewInventory) else "--"}</td>
-                <td class="num">${if (rec.msTotalStock > 0) String.format(Locale.getDefault(), "%,.1f", rec.msTotalStock) else "--"}</td>
-                $nozzleCellsHtml
-                <td class="num ms-col" style="font-weight:bold;">${if (rec.msSalesLitres > 0) String.format(Locale.getDefault(), "%,.1f", rec.msSalesLitres) else "--"}</td>
-                <td class="num" style="color:#c62828;">${if (rec.msTestingLitres > 0) String.format(Locale.getDefault(), "%,.1f", rec.msTestingLitres) else "--"}</td>
-                <td class="num">${if (rec.msRate > 0) String.format(Locale.getDefault(), "%,.2f", rec.msRate) else "--"}</td>
-                <td class="num ms-col" style="font-weight:bold;">${if (rec.msSalesAmount > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", rec.msSalesAmount) else "--"}</td>
-            </tr>
-        """.trimIndent())
-    }
-
-    val msColSpan = if (msNozzleLabels.isNotEmpty()) 3 + msNozzleLabels.size else 4
-    htmlBuilder.append("""
                         <tr class="total-row">
                             <td>TOTALS</td>
-                            <td colspan="$msColSpan">&mdash;</td>
-                            <td class="num ms-col" style="font-size: 10px;">${String.format(Locale.getDefault(), "%,.1f", totalMsLitres)} L</td>
+                            <td colspan="$colSpan">&mdash;</td>
+                            <td class="num" style="font-size: 10px;">${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L</td>
                             <td>&mdash;</td>
                             <td>&mdash;</td>
-                            <td class="num ms-col" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalMsAmt)}</td>
+                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalAmt)}</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+        """.trimIndent())
+    }
 
-            <!-- SHEET 2: HSD DIESEL -->
-            <div class="page">
-                <div class="header">
-                    <h1>D R INAMDAR PETROLEUM</h1>
-                    <p>Monthly Daily Sales & Stock Report &mdash; <strong>$monthName $year</strong></p>
-                    <p>Generated on: ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.getDefault()).format(Date())}</p>
-                </div>
-                
-                <div class="title-sect hsd-title-sect">HSD DIESEL (DIESEL) &mdash; DAILY SALES & STOCK SHEET</div>
-                
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width: 8%;">Date</th>
-                            <th style="width: 10%; text-align: right;">Op Stock (L)</th>
-                            <th style="width: 10%; text-align: right;">Receipts (L)</th>
-                            <th style="width: 10%; text-align: right;">Total Stock (L)</th>
-                            $hsdNozzleHeaderHtml
-                            <th style="width: 10%; text-align: right;">Sales (L)</th>
-                            <th style="width: 8%; text-align: right;">Test (L)</th>
-                            <th style="width: 8%; text-align: right;">Rate (₹)</th>
-                            <th style="width: 11%; text-align: right;">Amount (₹)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+    // SHEET: STATION CONSOLIDATED FUEL SUMMARY
+    htmlBuilder.append("""
+        <div class="page">
+            <div class="header">
+                <h1>D R INAMDAR PETROLEUM</h1>
+                <p>Monthly Station Consolidated Fuel Summary &mdash; <strong>$monthName $year</strong></p>
+            </div>
+            <div class="title-sect">FUEL-WISE SALES RECONCILIATION TOTALS</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Product Identity</th>
+                        <th style="text-align: right;">Total Quantity Sold (L)</th>
+                        <th style="text-align: right;">Total Revenue Earned (₹)</th>
+                    </tr>
+                </thead>
+                <tbody>
     """.trimIndent())
 
-    dailyRecords.forEach { rec ->
-        val hsdNozzles = rec.nozzlesList.filter { it.type == "HSD" }
-        val nozzleCellsHtml = if (hsdNozzleLabels.isNotEmpty()) {
-            hsdNozzleLabels.joinToString("") { label ->
-                val noz = hsdNozzles.firstOrNull { it.label == label }
-                val valueStr = if (noz != null) String.format(Locale.getDefault(), "%,.1f", noz.opening) else "--"
-                """<td class="num">$valueStr</td>"""
-            }
-        } else {
-            """<td class="nozzle-cell">--</td>"""
-        }
+    var grandStationLitres = 0.0
+    var grandStationRevenue = 0.0
+
+    allProducts.forEach { product ->
+        val prodTotalLitres = dailyRecords.sumOf { day -> day.products.find { it.productName == product }?.salesLitres ?: 0.0 }
+        val prodTotalRevenue = dailyRecords.sumOf { day -> day.products.find { it.productName == product }?.salesAmount ?: 0.0 }
+        grandStationLitres += prodTotalLitres
+        grandStationRevenue += prodTotalRevenue
 
         htmlBuilder.append("""
             <tr>
-                <td><strong>${rec.date}</strong></td>
-                <td class="num">${if (rec.hsdOpeningStock > 0) String.format(Locale.getDefault(), "%,.1f", rec.hsdOpeningStock) else "--"}</td>
-                <td class="num">${if (rec.hsdNewInventory > 0) String.format(Locale.getDefault(), "%,.1f", rec.hsdNewInventory) else "--"}</td>
-                <td class="num">${if (rec.hsdTotalStock > 0) String.format(Locale.getDefault(), "%,.1f", rec.hsdTotalStock) else "--"}</td>
-                $nozzleCellsHtml
-                <td class="num hsd-col" style="font-weight:bold;">${if (rec.hsdSalesLitres > 0) String.format(Locale.getDefault(), "%,.1f", rec.hsdSalesLitres) else "--"}</td>
-                <td class="num" style="color:#c62828;">${if (rec.hsdTestingLitres > 0) String.format(Locale.getDefault(), "%,.1f", rec.hsdTestingLitres) else "--"}</td>
-                <td class="num">${if (rec.hsdRate > 0) String.format(Locale.getDefault(), "%,.2f", rec.hsdRate) else "--"}</td>
-                <td class="num hsd-col" style="font-weight:bold;">${if (rec.hsdSalesAmount > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", rec.hsdSalesAmount) else "--"}</td>
+                <td><strong>$product</strong></td>
+                <td class="num">${String.format(Locale.getDefault(), "%,.1f", prodTotalLitres)} L</td>
+                <td class="num">₹${String.format(Locale.getDefault(), "%,.2f", prodTotalRevenue)}</td>
             </tr>
         """.trimIndent())
     }
 
-    val hsdColSpan = if (hsdNozzleLabels.isNotEmpty()) 3 + hsdNozzleLabels.size else 4
     htmlBuilder.append("""
-                        <tr class="total-row">
-                            <td>TOTALS</td>
-                            <td colspan="$hsdColSpan">&mdash;</td>
-                            <td class="num hsd-col" style="font-size: 10px;">${String.format(Locale.getDefault(), "%,.1f", totalHsdLitres)} L</td>
-                            <td>&mdash;</td>
-                            <td>&mdash;</td>
-                            <td class="num hsd-col" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalHsdAmt)}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <tr class="total-row" style="background-color: #f8fafc;">
+                <td><strong>STATION TOTALS (ALL PRODUCTS)</strong></td>
+                <td class="num" style="font-size: 11px;">${String.format(Locale.getDefault(), "%,.1f", grandStationLitres)} L</td>
+                <td class="num" style="font-size: 11px; color: #1a5f7a;">₹${String.format(Locale.getDefault(), "%,.2f", grandStationRevenue)}</td>
+            </tr>
+        </tbody>
+    </table>
+    </div>
+    """.trimIndent())
 
-            <!-- SHEET 3: CASH FLOW & COLLECTION SUMMARY -->
+    // Cash Sheet
+    htmlBuilder.append("""
             <div class="page">
                 <div class="header">
                     <h1>D R INAMDAR PETROLEUM</h1>
@@ -1115,9 +1048,9 @@ private fun printMonthlySalesReportPdf(
     htmlBuilder.append("""
                         <tr class="total-row">
                             <td>TOTALS</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalCashSubmitted)}</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalActualCashCollected)}</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold; background-color: #faf5ff; color: #7209b7;">₹${String.format(Locale.getDefault(), "%,.2f", totalCashCollected)}</td>
+                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashSubmitted)}</td>
+                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalActualCashCollected)}</td>
+                            <td class="num" style="font-size: 10px; font-weight: bold; background-color: #faf5ff; color: #7209b7;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashCollected)}</td>
                         </tr>
                     </tbody>
                 </table>

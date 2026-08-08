@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +37,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.example.database.AppDatabase
 import com.example.database.SavedAudit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,12 +60,12 @@ data class RecoveryCategorySummary(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonthlyUdhariJamaReportScreen(
+    adminPhone: String,
     onBack: () -> Unit,
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val db = remember { AppDatabase.getDatabase(context) }
 
     // Selected Month & Year (0-based Month, e.g. 0 = January, 6 = July)
     val calendar = Calendar.getInstance()
@@ -75,8 +75,20 @@ fun MonthlyUdhariJamaReportScreen(
     // Search query
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    // Load audits from DB
-    val allAuditsState = db.savedAuditDao().getAllAudits().collectAsState(initial = emptyList())
+    val resetAndBack = {
+        val now = Calendar.getInstance()
+        selectedMonth = now.get(Calendar.MONTH)
+        selectedYear = now.get(Calendar.YEAR)
+        searchQuery = ""
+        onBack()
+    }
+
+    BackHandler {
+        resetAndBack()
+    }
+
+    // Load audits from Cloud
+    val allAuditsState = com.example.database.FirestoreRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -186,7 +198,7 @@ fun MonthlyUdhariJamaReportScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = resetAndBack,
                         modifier = Modifier.testTag("udhari_jama_report_back")
                     ) {
                         Icon(

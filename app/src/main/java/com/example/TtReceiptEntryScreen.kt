@@ -33,7 +33,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.database.AppDatabase
 import com.example.database.TtReceiptEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -44,12 +43,12 @@ import java.util.*
 @Composable
 fun TtReceiptEntryScreen(
     onBack: () -> Unit,
+    adminPhone: String = "",
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val db = remember { AppDatabase.getDatabase(context) }
 
     // Date state
     val calendar = Calendar.getInstance()
@@ -517,6 +516,7 @@ fun TtReceiptEntryScreen(
                                 val hsdS = hsdShortage.toDoubleOrNull() ?: 0.0
 
                                 val newEntry = TtReceiptEntry(
+                                    ownerAdminPhone = adminPhone,
                                     date = selectedDate,
                                     invoiceNumber = invoiceNumber.trim(),
                                     ttNumber = ttNumber.trim(),
@@ -536,7 +536,7 @@ fun TtReceiptEntryScreen(
                                 )
 
                                 coroutineScope.launch(Dispatchers.IO) {
-                                    db.ttReceiptEntryDao().insertEntry(newEntry)
+                                    com.example.database.FirestoreRepository.saveTtEntry(newEntry)
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(context, "TT Receipt saved successfully!", Toast.LENGTH_SHORT).show()
                                         // Reset fields

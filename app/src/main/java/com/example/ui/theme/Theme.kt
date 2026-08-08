@@ -13,18 +13,18 @@ import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme =
   darkColorScheme(
-    primary = Color(0xFF8DA2FB), // Pastel Blue/Indigo
-    secondary = Color(0xFF5D75E3),
-    tertiary = BrandSuccess,
-    background = Color(0xFF0F172A), // Dark slate/navy
-    surface = Color(0xFF1E293B),
-    onPrimary = Color(0xFF0F172A),
-    onSecondary = Color(0xFFFFFFFF),
+    primary = Color(0xFF60A5FA), // Light Blue
+    secondary = AccentViolet,
+    tertiary = SuccessGreen,
+    background = Color(0xFF020617),
+    surface = DarkSlate,
+    onPrimary = Color(0xFF020617),
+    onSecondary = Color.White,
     onBackground = Color(0xFFF1F5F9),
     onSurface = Color(0xFFF1F5F9),
-    primaryContainer = Color(0xFF1E293B),
-    secondaryContainer = Color(0xFF1E293B),
-    surfaceVariant = Color(0xFF1E293B),
+    primaryContainer = DarkSlate,
+    secondaryContainer = DarkSlate,
+    surfaceVariant = DarkSlate,
     outline = Color(0xFF334155),
     outlineVariant = Color(0xFF1E293B),
     onSurfaceVariant = Color(0xFF94A3B8)
@@ -32,22 +32,22 @@ private val DarkColorScheme =
 
 private val LightColorScheme =
   lightColorScheme(
-    primary = BrandNavy,
-    secondary = BrandNavyLight,
-    tertiary = BrandSuccess,
-    background = BrandBackground,
-    surface = BrandSurface,
+    primary = PrimaryBlue,
+    secondary = DarkBlue,
+    tertiary = SuccessGreen,
+    background = DashboardBackground,
+    surface = CardWhite,
     onPrimary = Color.White,
     onSecondary = Color.White,
-    onBackground = BrandLabelNavy,
-    onSurface = BrandLabelNavy,
-    primaryContainer = BrandIceBlue,
-    onPrimaryContainer = BrandNavy,
-    secondaryContainer = BrandSurface,
-    surfaceVariant = BrandSurface,
-    outline = BrandBorderLight,
-    outlineVariant = BrandDividerLight,
-    onSurfaceVariant = BrandLabelDark
+    onBackground = DarkSlate,
+    onSurface = DarkSlate,
+    primaryContainer = Color(0xFFEFF6FF),
+    onPrimaryContainer = PrimaryBlue,
+    secondaryContainer = CardWhite,
+    surfaceVariant = CardWhite,
+    outline = Color(0xFFE2E8F0),
+    outlineVariant = Color(0xFFF1F5F9),
+    onSurfaceVariant = Color(0xFF64748B)
   )
 
 @Composable

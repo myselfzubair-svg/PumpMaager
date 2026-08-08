@@ -17,4 +17,5 @@ local.properties
 .env
 *.jks
 *.keystore
+keystore.properties
 .artifacts/

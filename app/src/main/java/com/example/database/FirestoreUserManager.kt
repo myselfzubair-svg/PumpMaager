@@ -53,7 +53,7 @@ object FirestoreUserManager {
     }
 
     /**
-     * Creates or updates a user document inside the "users" collection in Cloud Firestore.
+     * Creates or updates a user document inside the "users" collection and registers the membership.
      */
     suspend fun saveUserToFirestore(mobileNumber: String, username: String, ownerName: String = "", passwordHash: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -72,10 +72,60 @@ object FirestoreUserManager {
             )
             
             Tasks.await(docRef.set(data, SetOptions.merge()))
-            Log.d(TAG, "Successfully saved user to 'users' collection")
+
+            // Also register as an Admin membership for themselves
+            val membershipRef = firestore.collection("memberships").document(formattedMobile)
+                .collection("accounts").document("${formattedMobile}_ADMIN")
+            val membershipData = hashMapOf(
+                "adminPhone" to formattedMobile,
+                "pumpName" to username,
+                "username" to username,
+                "role" to "ADMIN"
+            )
+            Tasks.await(membershipRef.set(membershipData, SetOptions.merge()))
+
+            Log.d(TAG, "Successfully saved user and registered membership")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving user to Firestore 'users' collection", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Records a membership for a staff member.
+     */
+    suspend fun addStaffMembership(staffPhone: String, adminPhone: String, staffName: String, pumpName: String, role: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val formattedStaff = formatMobileNumber(staffPhone)
+            val formattedAdmin = formatMobileNumber(adminPhone)
+            val membershipRef = firestore.collection("memberships").document(formattedStaff)
+                .collection("accounts").document("${formattedAdmin}_${role}")
+            val data = hashMapOf(
+                "adminPhone" to formattedAdmin,
+                "pumpName" to pumpName,
+                "username" to staffName,
+                "role" to role
+            )
+            Tasks.await(membershipRef.set(data, SetOptions.merge()))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Retrieves all accounts associated with a mobile number.
+     */
+    suspend fun getUserMemberships(mobileNumber: String): Result<List<Map<String, Any>>> = withContext(Dispatchers.IO) {
+        try {
+            val formattedMobile = formatMobileNumber(mobileNumber)
+            val colRef = firestore.collection("memberships").document(formattedMobile).collection("accounts")
+            val task = colRef.get()
+            val snapshot = Tasks.await(task)
+            val memberships = snapshot.documents.map { it.data ?: emptyMap() }
+            Result.success(memberships)
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }

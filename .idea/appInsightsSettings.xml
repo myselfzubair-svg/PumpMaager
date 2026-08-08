@@ -9,9 +9,9 @@
               <option name="connection">
                 <ConnectionSetting>
                   <option name="appId" value="com.mypump.cal" />
-                  <option name="mobileSdkAppId" value="1:962806261205:android:1d6474b227b347b971c95c" />
-                  <option name="projectId" value="pumpmanager-2908f" />
-                  <option name="projectNumber" value="962806261205" />
+                  <option name="mobileSdkAppId" value="1:985120822522:android:83acfd4c25583c99e2e543" />
+                  <option name="projectId" value="my-fuel-audit" />
+                  <option name="projectNumber" value="985120822522" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

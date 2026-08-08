@@ -1,60 +1,125 @@
 package com.example
 
+import android.app.DatePickerDialog
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.database.RegisteredNozzle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NozzleSelectionScreen(
-    onNavigateToCalculator: (msCount: Int, hsdCount: Int, msLabels: List<String>, hsdLabels: List<String>) -> Unit,
+    onNavigateToCalculator: (List<RegisteredNozzle>, date: String, caName: String) -> Unit,
     onNavigateToFullDay: () -> Unit,
     onBack: () -> Unit,
     onLogout: () -> Unit = {},
     initialMsCount: Int = 2,
     initialHsdCount: Int = 2,
     username: String = "",
+    adminPhone: String = "",
     isCaModule: Boolean = false,
-    msNozzleLabels: List<String> = emptyList(),
-    hsdNozzleLabels: List<String> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    var msNozzleCountText by rememberSaveable { mutableStateOf(initialMsCount.toString()) }
-    var hsdNozzleCountText by rememberSaveable { mutableStateOf(initialHsdCount.toString()) }
+    val context = LocalContext.current
+    val calendar = Calendar.getInstance()
+    val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+    val coroutineScope = rememberCoroutineScope()
+
+    // Screen State
+    var nozzlesList by remember { mutableStateOf<List<RegisteredNozzle>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Step 2 State: Date
+    var selectedDate by rememberSaveable { mutableStateOf(sdf.format(Date())) }
+
+    // Step 3 State: Nozzle Selection
+    var selectedNozzleIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    var nozzleSearchQuery by rememberSaveable { mutableStateOf("") }
+
+    // Legacy/Manager States
+    val legacyProductCounts = remember { mutableStateMapOf<String, String>() }
+    var stationProducts by remember { mutableStateOf<List<String>>(emptyList()) }
+    
     var showError by remember { mutableStateOf(false) }
 
-    var selectedMsNozzles by remember(msNozzleLabels) { mutableStateOf(emptySet<String>()) }
-    var selectedHsdNozzles by remember(hsdNozzleLabels) { mutableStateOf(emptySet<String>()) }
+    // Fetch Nozzles every time screen is opened
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            isLoading = true
+            errorMessage = null
+            try {
+                val list = withContext(Dispatchers.IO) {
+                    com.example.database.FirestoreRepository.getRegisteredNozzles(adminPhone)
+                }
+                nozzlesList = list
+                
+                val pumpInfo = withContext(Dispatchers.IO) {
+                    com.example.database.FirestoreRepository.getPumpInfo(adminPhone)
+                }
+                stationProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() } ?: listOf("MS", "HSD")
+                
+                stationProducts.forEach { product ->
+                    if (!legacyProductCounts.containsKey(product)) {
+                        legacyProductCounts[product] = "1"
+                    }
+                }
 
-    val isDbRestricted = isCaModule && username.isNotBlank() && (msNozzleLabels.isNotEmpty() || hsdNozzleLabels.isNotEmpty())
+                isLoading = false
+            } catch (_: Exception) {
+                errorMessage = LanguageManager.errorLoadingNozzles
+                isLoading = false
+            }
+        }
+    }
 
-    LaunchedEffect(isDbRestricted, msNozzleLabels, hsdNozzleLabels, selectedMsNozzles, selectedHsdNozzles) {
-        if (isDbRestricted) {
-            msNozzleCountText = selectedMsNozzles.size.toString()
-            hsdNozzleCountText = selectedHsdNozzles.size.toString()
+    // Filter active nozzles from DB
+    val activeNozzles = remember(nozzlesList) {
+        nozzlesList.filter { it.isActive }
+    }
+
+    val filteredNozzles = remember(activeNozzles, nozzleSearchQuery) {
+        if (nozzleSearchQuery.isBlank()) {
+            activeNozzles
+        } else {
+            activeNozzles.filter {
+                it.label.contains(nozzleSearchQuery, ignoreCase = true) ||
+                it.nozzleName.contains(nozzleSearchQuery, ignoreCase = true) ||
+                it.tankName.contains(nozzleSearchQuery, ignoreCase = true) ||
+                it.nozzleType.contains(nozzleSearchQuery, ignoreCase = true)
+            }
         }
     }
 
@@ -63,7 +128,7 @@ fun NozzleSelectionScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = LanguageManager.translate("Configure Nozzles", "नोज़ल कॉन्फ़िगर करें"),
+                        text = if (isCaModule) LanguageManager.caConfigTitle else LanguageManager.translate("Configure Nozzles", "नोज़ल कॉन्फ़िगर करें"),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -106,60 +171,281 @@ fun NozzleSelectionScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Greeting & Instruction
-            Text(
-                text = LanguageManager.translate("Nozzle Configuration", "नोज़ल कॉन्फ़िगरेशन"),
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                ),
-                textAlign = TextAlign.Center
-            )
-
-            if (isDbRestricted) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (errorMessage != null) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = username.take(1).uppercase(),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = errorMessage!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                        TextButton(onClick = { 
+                            // Retry logic
+                            isLoading = true
+                            errorMessage = null
+                            coroutineScope.launch {
+                                try {
+                                    val list = withContext(Dispatchers.IO) {
+                                        com.example.database.FirestoreRepository.getRegisteredNozzles(adminPhone)
+                                    }
+                                    nozzlesList = list
+                                } catch (e: Exception) {
+                                    errorMessage = LanguageManager.errorLoadingNozzles
+                                } finally {
+                                    isLoading = false
+                                }
                             }
+                        }) {
+                            Text(LanguageManager.translate("Retry", "पुनः प्रयास करें"))
                         }
-                        Column {
+                    }
+                }
+            } else if (isCaModule) {
+                // CA MODULE STEP-BY-STEP WORKFLOW
+
+                // STEP 1: CA NAME (READ ONLY)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = LanguageManager.stepCaName,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Text(
-                                text = LanguageManager.translate("Active User: $username", "सक्रिय उपयोगकर्ता: $username"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = LanguageManager.translate(
-                                    "Showing only registered nozzles in database.",
-                                    "डेटाबेस में केवल पंजीकृत नोज़ल दिखा रहा है।"
-                                ),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                text = "$username ${LanguageManager.caNameAutoFilled}",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
                 }
+
+                // STEP 2: SELECT DATE
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        val parts = selectedDate.split("-")
+                        if (parts.size == 3) {
+                            calendar.set(Calendar.DAY_OF_MONTH, parts[0].toInt())
+                            calendar.set(Calendar.MONTH, parts[1].toInt() - 1)
+                            calendar.set(Calendar.YEAR, parts[2].toInt())
+                        }
+                        val dialog = DatePickerDialog(
+                            context,
+                            { _, year, month, day ->
+                                selectedDate = String.format("%02d-%02d-%04d", day, month + 1, year)
+                            },
+                            calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)
+                        )
+                        dialog.datePicker.maxDate = System.currentTimeMillis() // Restrict future dates
+                        dialog.show()
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column {
+                                Text(
+                                    text = LanguageManager.stepSelectDate,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(text = selectedDate, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
+                        Text(
+                            text = LanguageManager.translate("Change", "बदलें"),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // STEP 3: SELECT NOZZLES
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = LanguageManager.stepSelectNozzles,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = LanguageManager.selectNozzlesDesc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (activeNozzles.isEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
+                        ) {
+                            Text(
+                                text = LanguageManager.noNozzlesFound,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(16.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        // Search & Bulk Select
+                        OutlinedTextField(
+                            value = nozzleSearchQuery,
+                            onValueChange = { nozzleSearchQuery = it },
+                            placeholder = { Text(LanguageManager.searchNozzles) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+                        )
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = { selectedNozzleIds = activeNozzles.map { it.nozzleId }.toSet() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.SelectAll, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(LanguageManager.selectAll)
+                            }
+                            TextButton(
+                                onClick = { selectedNozzleIds = emptySet() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(LanguageManager.clearSelection)
+                            }
+                        }
+
+                        // Nozzle List
+                        filteredNozzles.forEach { nozzle ->
+                            val isSelected = selectedNozzleIds.contains(nozzle.nozzleId)
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    selectedNozzleIds = if (isSelected) selectedNozzleIds - nozzle.nozzleId else selectedNozzleIds + nozzle.nozzleId
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            selectedNozzleIds = if (checked) selectedNozzleIds + nozzle.nozzleId else selectedNozzleIds - nozzle.nozzleId
+                                        }
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = nozzle.label,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "${nozzle.nozzleType} | ${nozzle.tankName}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (nozzle.nozzleNumber.isNotBlank()) {
+                                        Surface(
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = CircleShape,
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = nozzle.nozzleNumber,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Proceed Button
+                Button(
+                    onClick = {
+                        if (selectedNozzleIds.isEmpty()) {
+                            showError = true
+                        } else {
+                            val nozzles = activeNozzles.filter { selectedNozzleIds.contains(it.nozzleId) }
+                            onNavigateToCalculator(nozzles, selectedDate, username)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp).testTag("start_calculation_button"),
+                    shape = RoundedCornerShape(28.dp),
+                    enabled = selectedNozzleIds.isNotEmpty()
+                ) {
+                    Text(text = LanguageManager.startCalculation, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                }
+
             } else {
+                // LEGACY / MANAGER CONFIGURATION (Dynamic count based)
+                Text(
+                    text = LanguageManager.translate("Nozzle Configuration", "नोज़ल कॉन्फ़िगरेशन"),
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    ),
+                    textAlign = TextAlign.Center
+                )
+
                 Text(
                     text = LanguageManager.translate(
                         "Please specify the active number of MS and HSD nozzles (up to 10 each) to dynamically customize your shift calculation.",
@@ -170,353 +456,94 @@ fun NozzleSelectionScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
-            }
 
-            if (showError) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = LanguageManager.translate(
-                            "Please select at least one active nozzle (MS or HSD) to proceed.",
-                            "कृपया आगे बढ़ने के लिए कम से कम एक सक्रिय नोज़ल (MS या HSD) चुनें।"
-                        ),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            // 1. Motor Spirit (MS) Petrol Nozzles Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = LanguageManager.translate("Motor Spirit (MS) Nozzles", "मोटर स्पिरिट (MS) नोज़ल"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    if (isDbRestricted) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = LanguageManager.translate(
-                                    "Select Active MS Nozzles:",
-                                    "सक्रिय MS नोज़ल चुनें:"
-                                ),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            msNozzleLabels.forEach { label ->
-                                val isSelected = selectedMsNozzles.contains(label)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                            else Color.Transparent, 
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable {
-                                            selectedMsNozzles = if (isSelected) {
-                                                selectedMsNozzles - label
-                                            } else {
-                                                selectedMsNozzles + label
-                                            }
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = { checked ->
-                                            selectedMsNozzles = if (checked) {
-                                                selectedMsNozzles + label
-                                            } else {
-                                                selectedMsNozzles - label
-                                            }
-                                        },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        VoiceOutlinedTextField(
-                            value = msNozzleCountText,
-                            onValueChange = { input ->
-                                val filtered = input.filter { it.isDigit() }
-                                val num = filtered.toIntOrNull()
-                                if (num == null) {
-                                    msNozzleCountText = ""
-                                } else if (num in 0..10) {
-                                    msNozzleCountText = filtered
-                                }
-                            },
-                            label = {
-                                Text(LanguageManager.translate("MS Nozzle Count (0-10)", "MS नोज़ल संख्या (0-10)"))
-                            },
-                            placeholder = {
-                                Text("e.g. 2 or 4")
-                            },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ms_nozzle_count_input"),
-                            shape = RoundedCornerShape(12.dp)
+                if (showError) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = LanguageManager.translate(
+                                "Please select at least one active nozzle to proceed.",
+                                "आगे बढ़ने के लिए कृपया कम से कम एक सक्रिय नोज़ल चुनें।"
+                            ),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(16.dp),
+                            textAlign = TextAlign.Center
                         )
-
-                        // Quick select options for MS
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("0", "1", "2", "3", "4", "6", "8", "10").forEach { count ->
-                                val isSelected = msNozzleCountText == count
-                                OutlinedButton(
-                                    onClick = { msNozzleCountText = count },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(42.dp)
-                                        .testTag("quick_select_ms_$count"),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(0.dp),
-                                    border = BorderStroke(
-                                        width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                                    ),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                    )
-                                ) {
-                                    Text(
-                                        text = count,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
-            }
 
-            // 2. High Speed Diesel (HSD) Diesel Nozzles Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = LanguageManager.translate("High Speed Diesel (HSD) Nozzles", "हाई स्पीड डीजल (HSD) नोज़ल"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
+                // Dynamic Legacy Sections per Product
+                stationProducts.forEach { product ->
+                    val isMs = isSameProduct(product, "MS")
+                    val isHsd = isSameProduct(product, "HSD")
+                    val badgeColor = when {
+                        isMs -> MaterialTheme.colorScheme.primary
+                        isHsd -> MaterialTheme.colorScheme.tertiary
+                        else -> Color(0xFF8B5CF6)
+                    }
 
-                    if (isDbRestricted) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    ) {
+                        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             Text(
-                                text = LanguageManager.translate(
-                                    "Select Active HSD Nozzles:",
-                                    "सक्रिय HSD नोज़ल चुनें:"
-                                ),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "$product Nozzles",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = badgeColor
                             )
-                            hsdNozzleLabels.forEach { label ->
-                                val isSelected = selectedHsdNozzles.contains(label)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            if (isSelected) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
-                                            else Color.Transparent, 
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable {
-                                            selectedHsdNozzles = if (isSelected) {
-                                                selectedHsdNozzles - label
-                                            } else {
-                                                selectedHsdNozzles + label
-                                            }
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = { checked ->
-                                            selectedHsdNozzles = if (checked) {
-                                                selectedHsdNozzles + label
-                                            } else {
-                                                selectedHsdNozzles - label
-                                            }
-                                        },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = MaterialTheme.colorScheme.tertiary
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        VoiceOutlinedTextField(
-                            value = hsdNozzleCountText,
-                            onValueChange = { input ->
-                                val filtered = input.filter { it.isDigit() }
-                                val num = filtered.toIntOrNull()
-                                if (num == null) {
-                                    hsdNozzleCountText = ""
-                                } else if (num in 0..10) {
-                                    hsdNozzleCountText = filtered
-                                }
-                            },
-                            label = {
-                                Text(LanguageManager.translate("HSD Nozzle Count (0-10)", "HSD नोज़ल संख्या (0-10)"))
-                            },
-                            placeholder = {
-                                Text("e.g. 2 or 4")
-                            },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("hsd_nozzle_count_input"),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        // Quick select options for HSD
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("0", "1", "2", "3", "4", "6", "8", "10").forEach { count ->
-                                val isSelected = hsdNozzleCountText == count
-                                OutlinedButton(
-                                    onClick = { hsdNozzleCountText = count },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(42.dp)
-                                        .testTag("quick_select_hsd_$count"),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(0.dp),
-                                    border = BorderStroke(
-                                        width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline
-                                    ),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (isSelected) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent,
-                                        contentColor = if (isSelected) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface
-                                    )
-                                ) {
-                                    Text(
-                                        text = count,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            }
+                            VoiceOutlinedTextField(
+                                value = legacyProductCounts[product] ?: "",
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isDigit() }
+                                    if (filtered.isEmpty()) legacyProductCounts[product] = ""
+                                    else if (filtered.toInt() in 0..15) legacyProductCounts[product] = filtered
+                                },
+                                label = { Text("$product Count (0-15)") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Proceed Button
-            Button(
-                onClick = {
-                    val msCountVal = msNozzleCountText.toIntOrNull() ?: 0
-                    val hsdCountVal = hsdNozzleCountText.toIntOrNull() ?: 0
-                    if (msCountVal == 0 && hsdCountVal == 0) {
-                        showError = true
-                    } else {
-                        showError = false
-                        if (isDbRestricted) {
-                            val activeMs = msNozzleLabels.filter { selectedMsNozzles.contains(it) }
-                            val activeHsd = hsdNozzleLabels.filter { selectedHsdNozzles.contains(it) }
-                            onNavigateToCalculator(activeMs.size, activeHsd.size, activeMs, activeHsd)
-                        } else {
-                            onNavigateToCalculator(msCountVal, hsdCountVal, emptyList(), emptyList())
+                Button(
+                    onClick = {
+                        val allCounts = legacyProductCounts.values.map { it.toIntOrNull() ?: 0 }
+                        if (allCounts.sum() == 0) showError = true
+                        else {
+                            val dummyList = mutableListOf<RegisteredNozzle>()
+                            stationProducts.forEach { product ->
+                                val count = legacyProductCounts[product]?.toIntOrNull() ?: 0
+                                for (i in 1..count) {
+                                    dummyList.add(RegisteredNozzle(
+                                        mobileNumber = adminPhone,
+                                        nozzleType = product,
+                                        productId = "PROD_${product.uppercase().replace(" ", "_")}",
+                                        label = "$product Nozzle $i",
+                                        nozzleName = "$product Nozzle $i",
+                                        nozzleNumber = i.toString(),
+                                        nozzleIndex = dummyList.size
+                                    ))
+                                }
+                            }
+                            onNavigateToCalculator(dummyList, selectedDate, username)
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .testTag("proceed_nozzle_selection"),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(28.dp)
                 ) {
-                    Text(
-                        text = LanguageManager.translate("PROCEED TO DETAILS", "विवरण पर जाएं"),
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
-                    )
+                    Text(text = LanguageManager.translate("PROCEED TO DETAILS", "विवरण पर जाएं"), fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.width(10.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Proceed arrow"
-                    )
+                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
                 }
             }
         }

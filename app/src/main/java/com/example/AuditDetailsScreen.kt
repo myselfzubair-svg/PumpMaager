@@ -39,6 +39,7 @@ import java.util.Locale
 fun AuditDetailsScreen(
     isFourNozzle: Boolean,
     selectedDate: String,
+    adminPhone: String = "",
     onBack: () -> Unit,
     onProceed: (date: String, caName: String, meterNo: String) -> Unit,
     onLogout: () -> Unit = {},

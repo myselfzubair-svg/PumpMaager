@@ -41,6 +41,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.database.HistoryViewModel
 import com.example.database.MsNozzleReading
 import com.example.database.HsdNozzleReading
+import com.example.database.GeneralNozzleReading
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -523,10 +526,18 @@ fun TwoNozzleCalculatorScreen(
     meterNo: String = "",
     nozzleCount: Int = 2,
     phone: String = "",
+    adminPhone: String = "",
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val historyViewModel: HistoryViewModel = viewModel()
+
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            historyViewModel.setAdminPhone(adminPhone)
+        }
+    }
+    
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
     var activeNozzleCount by rememberSaveable { mutableStateOf(nozzleCount) }
     var nozzle1Closing by rememberSaveable { mutableStateOf("") }
@@ -591,54 +602,84 @@ fun TwoNozzleCalculatorScreen(
     var newUdharNameInput by remember { mutableStateOf("") }
 
     val context = LocalContext.current
-    val sharedPrefs = remember(context) { context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE) }
-    var udhariNamesList by remember {
-        mutableStateOf(
-            run {
-                val saved = sharedPrefs.getString("udhari_names_list", "") ?: ""
-                val list = if (saved.isBlank()) {
-                    listOf("Miscellaneous")
-                } else {
-                    saved.split(";").filter { it.isNotBlank() }
-                }
-                if (!list.contains("Miscellaneous")) {
-                    listOf("Miscellaneous") + list
-                } else {
-                    list
-                }
-            }
-        )
-    }
+    val coroutineScope = rememberCoroutineScope()
+    var udhariNamesList by remember { mutableStateOf(listOf("Miscellaneous")) }
     var showAddUdhariDialog by remember { mutableStateOf(false) }
     var newUdhariNameInput by remember { mutableStateOf("") }
 
+    var densityMs by remember { mutableStateOf("") }
+    var densityHsd by remember { mutableStateOf("") }
+    var stockMs by remember { mutableStateOf("") }
+    var stockHsd by remember { mutableStateOf("") }
+    var receiptMs by remember { mutableStateOf("") }
+    var receiptHsd by remember { mutableStateOf("") }
+
     val clipboardManager = LocalClipboardManager.current
 
-    LaunchedEffect(date) {
-        val sharedPrefs = context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-        val rateMs = sharedPrefs.getString("rate_ms_$date", "") ?: ""
-        val rateHsd = sharedPrefs.getString("rate_hsd_$date", "") ?: ""
-        msRateValue = rateMs
-        hsdRateValue = rateHsd
+    LaunchedEffect(date, adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            val config = com.example.database.FirestoreRepository.getDailyConfig(adminPhone, date)
+            densityMs = config["density_ms"] ?: ""
+            densityHsd = config["density_hsd"] ?: ""
+            msRateValue = config["rate_ms"] ?: ""
+            hsdRateValue = config["rate_hsd"] ?: ""
+            stockMs = config["stock_ms"] ?: ""
+            stockHsd = config["stock_hsd"] ?: ""
+            receiptMs = config["receipt_ms"] ?: ""
+            receiptHsd = config["receipt_hsd"] ?: ""
+
+            udhariNamesList = com.example.database.FirestoreRepository.getUdhariNames(adminPhone)
+        }
     }
 
-    LaunchedEffect(phone) {
-        if (phone.isNotEmpty()) {
-            val lastMs = historyViewModel.getLatestMsReadingForNozzle("Noz 1 (MS)", phone)
-            if (lastMs != null) {
-                nozzle1Opening = lastMs.closingReading.toString()
-            } else {
-                val initialVal = historyViewModel.getInitialReadingForNozzle("Noz 1 (MS)", phone)
-                nozzle1Opening = if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
-            }
+    LaunchedEffect(phone, adminPhone, date) {
+        if (phone.isNotEmpty() && adminPhone.isNotEmpty()) {
+            historyViewModel.setAdminPhone(adminPhone)
 
-            val lastHsd = historyViewModel.getLatestHsdReadingForNozzle("Noz 2 (HSD)", phone)
-            if (lastHsd != null) {
-                nozzle2Opening = lastHsd.closingReading.toString()
-            } else {
-                val initialVal = historyViewModel.getInitialReadingForNozzle("Noz 2 (HSD)", phone)
-                nozzle2Opening = if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
+            launch {
+                combine(
+                    historyViewModel.allMsNozzleReadings,
+                    historyViewModel.allHsdNozzleReadings
+                ) { ms: List<MsNozzleReading>, hsd: List<HsdNozzleReading> ->
+                    ms to hsd
+                }.collect { (msReadings, hsdReadings) ->
+                    // Noz 1 (MS)
+                    val dayMs = msReadings.filter { it.date == date && it.nozzleLabel == "Noz 1 (MS)" }.maxByOrNull { it.timestamp }
+                    var openingMs: Double? = dayMs?.closingReading
+                    
+                    if (openingMs == null) {
+                        openingMs = msReadings.filter { it.nozzleLabel == "Noz 1 (MS)" }.maxByOrNull { it.timestamp }?.closingReading
+                    }
+
+                    if (nozzle1Opening.isEmpty()) {
+                        if (openingMs != null) {
+                            nozzle1Opening = if (openingMs % 1.0 == 0.0) openingMs.toLong().toString() else openingMs.toString()
+                        } else {
+                            val initialVal = historyViewModel.getInitialReadingForNozzle("Noz 1 (MS)", adminPhone)
+                            nozzle1Opening = if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
+                        }
+                    }
+
+                    // Noz 2 (HSD)
+                    val dayHsd = hsdReadings.filter { it.date == date && it.nozzleLabel == "Noz 2 (HSD)" }.maxByOrNull { it.timestamp }
+                    var openingHsd: Double? = dayHsd?.closingReading
+
+                    if (openingHsd == null) {
+                        openingHsd = hsdReadings.filter { it.nozzleLabel == "Noz 2 (HSD)" }.maxByOrNull { it.timestamp }?.closingReading
+                    }
+
+                    if (nozzle2Opening.isEmpty()) {
+                        if (openingHsd != null) {
+                            nozzle2Opening = if (openingHsd % 1.0 == 0.0) openingHsd.toLong().toString() else openingHsd.toString()
+                        } else {
+                            val initialVal = historyViewModel.getInitialReadingForNozzle("Noz 2 (HSD)", adminPhone)
+                            nozzle2Opening = if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
+                        }
+                    }
+                }
             }
+            
+            udhariNamesList = com.example.database.FirestoreRepository.getUdhariNames(adminPhone)
         }
     }
 
@@ -969,17 +1010,9 @@ fun TwoNozzleCalculatorScreen(
         val formattedDate = date.ifEmpty { "Same Date" }
         val formattedCaName = caName.ifEmpty { "N/A" }
         val formattedMeterNo = meterNo.ifEmpty { "N/A" }
-
-        val sharedPrefs = context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-        val densityMs = sharedPrefs.getString("density_ms_$date", "") ?: ""
-        val densityHsd = sharedPrefs.getString("density_hsd_$date", "") ?: ""
-        val stockMs = sharedPrefs.getString("stock_ms_$date", "") ?: ""
-        val stockHsd = sharedPrefs.getString("stock_hsd_$date", "") ?: ""
-        val receiptMs = sharedPrefs.getString("receipt_ms_$date", "") ?: ""
-        val receiptHsd = sharedPrefs.getString("receipt_hsd_$date", "") ?: ""
         
-        val rMs = if (msRateValue.isNotBlank()) "₹$msRateValue" else (sharedPrefs.getString("rate_ms_$date", "")?.let { if (it.isNotBlank()) "₹$it" else "N/A" } ?: "N/A")
-        val rHsd = if (hsdRateValue.isNotBlank()) "₹$hsdRateValue" else (sharedPrefs.getString("rate_hsd_$date", "")?.let { if (it.isNotBlank()) "₹$it" else "N/A" } ?: "N/A")
+        val rMs = if (msRateValue.isNotBlank()) "₹$msRateValue" else "N/A"
+        val rHsd = if (hsdRateValue.isNotBlank()) "₹$hsdRateValue" else "N/A"
 
         val tableUdhariJamaHtml = if (udhariJamaList.isEmpty()) {
             "<tr><td colspan='2' style='text-align: center; color: #a0aec0;'>No recoveries entered</td></tr>"
@@ -1806,7 +1839,9 @@ fun TwoNozzleCalculatorScreen(
                                                 if (!udhariNamesList.contains(name)) {
                                                     val newList = udhariNamesList + name
                                                     udhariNamesList = newList
-                                                    sharedPrefs.edit().putString("udhari_names_list", newList.joinToString(";")).apply()
+                                                    coroutineScope.launch {
+                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                    }
                                                 }
                                                 tempUdhariJamaName = name
                                                 newUdhariNameInput = ""
@@ -2675,7 +2710,9 @@ fun TwoNozzleCalculatorScreen(
                                                 if (!udhariNamesList.contains(name)) {
                                                     val newList = udhariNamesList + name
                                                     udhariNamesList = newList
-                                                    sharedPrefs.edit().putString("udhari_names_list", newList.joinToString(";")).apply()
+                                                    coroutineScope.launch {
+                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                    }
                                                 }
                                                 tempUdharName = name
                                                 newUdharNameInput = ""
@@ -3395,6 +3432,7 @@ fun TwoNozzleCalculatorScreen(
                         val report = getSummaryText()
                         val htmlReport = generateA4HtmlReport()
                         historyViewModel.saveAudit(
+                            adminPhone = adminPhone,
                             date = date,
                             caName = caName,
                             meterNo = meterNo,
@@ -3409,6 +3447,7 @@ fun TwoNozzleCalculatorScreen(
                         val n1Op = nozzle1Opening.toDoubleOrNull() ?: 0.0
                         val n1Cl = nozzle1Closing.toDoubleOrNull() ?: 0.0
                         val msReading = MsNozzleReading(
+                            ownerAdminPhone = adminPhone,
                             nozzleLabel = "Noz 1 (MS)",
                             openingReading = minOf(n1Op, n1Cl),
                             closingReading = maxOf(n1Op, n1Cl),
@@ -3428,6 +3467,7 @@ fun TwoNozzleCalculatorScreen(
                             val n2Op = nozzle2Opening.toDoubleOrNull() ?: 0.0
                             val n2Cl = nozzle2Closing.toDoubleOrNull() ?: 0.0
                             val hsdReading = HsdNozzleReading(
+                                ownerAdminPhone = adminPhone,
                                 nozzleLabel = "Noz 2 (HSD)",
                                 openingReading = minOf(n2Op, n2Cl),
                                 closingReading = maxOf(n2Op, n2Cl),

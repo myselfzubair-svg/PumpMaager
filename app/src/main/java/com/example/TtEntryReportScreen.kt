@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,7 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.database.AppDatabase
 import com.example.database.TtReceiptEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,14 +37,14 @@ import java.util.*
 @Composable
 fun TtEntryReportScreen(
     onBack: () -> Unit,
+    adminPhone: String = "",
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val db = remember { AppDatabase.getDatabase(context) }
 
-    // Selected Month & Year (0-based Month, e.g. 0 = January, 6 = July)
+    // Selected Month & Year
     val calendar = Calendar.getInstance()
     var selectedMonth by rememberSaveable { mutableStateOf(calendar.get(Calendar.MONTH)) }
     var selectedYear by rememberSaveable { mutableStateOf(calendar.get(Calendar.YEAR)) }
@@ -52,9 +52,20 @@ fun TtEntryReportScreen(
     // State for loading entries
     var allEntries by remember { mutableStateOf(emptyList<TtReceiptEntry>()) }
 
+    val resetAndBack = {
+        val now = Calendar.getInstance()
+        selectedMonth = now.get(Calendar.MONTH)
+        selectedYear = now.get(Calendar.YEAR)
+        onBack()
+    }
+
+    BackHandler {
+        resetAndBack()
+    }
+
     fun loadEntries() {
         coroutineScope.launch(Dispatchers.IO) {
-            val list = db.ttReceiptEntryDao().getAllEntries()
+            val list = com.example.database.FirestoreRepository.getTtEntries(adminPhone)
             withContext(Dispatchers.Main) {
                 allEntries = list
             }
@@ -113,7 +124,7 @@ fun TtEntryReportScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = resetAndBack,
                         modifier = Modifier.testTag("tt_report_back_button")
                     ) {
                         Icon(

@@ -1,0 +1,5 @@
+- [ ] Add state variables for role selection in `LoginScreen.kt`
+- [ ] Update `completeLoginFlow` logic to detect dual roles
+- [ ] Implement `RoleSelectionDialog` UI in `LoginScreen.kt`
+- [ ] Refactor login success logic into reusable functions for role selection
+- [ ] Verify build

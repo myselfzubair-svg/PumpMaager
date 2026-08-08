@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.database.HistoryViewModel
 import com.example.database.MsNozzleReading
 import com.example.database.HsdNozzleReading
+import com.example.database.GeneralNozzleReading
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
 import java.util.Locale
 
 data class UdhariJamaItem(
@@ -503,64 +509,34 @@ fun CalculatorScreen(
     date: String = "",
     caName: String = "",
     meterNo: String = "",
-    msNozzleCount: Int = 2,
-    hsdNozzleCount: Int = 2,
-    msNozzleLabels: List<String> = emptyList(),
-    hsdNozzleLabels: List<String> = emptyList(),
+    selectedNozzles: List<com.example.database.RegisteredNozzle> = emptyList(),
     phone: String = "",
+    adminPhone: String = "",
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val historyViewModel: HistoryViewModel = viewModel()
-    var msClosing1 by rememberSaveable { mutableStateOf("") }
-    var msOpening1 by rememberSaveable { mutableStateOf("") }
-    var msClosing2 by rememberSaveable { mutableStateOf("") }
-    var msOpening2 by rememberSaveable { mutableStateOf("") }
-    var msClosing3 by rememberSaveable { mutableStateOf("") }
-    var msOpening3 by rememberSaveable { mutableStateOf("") }
-    var msClosing4 by rememberSaveable { mutableStateOf("") }
-    var msOpening4 by rememberSaveable { mutableStateOf("") }
-    var msClosing5 by rememberSaveable { mutableStateOf("") }
-    var msOpening5 by rememberSaveable { mutableStateOf("") }
-    var msClosing6 by rememberSaveable { mutableStateOf("") }
-    var msOpening6 by rememberSaveable { mutableStateOf("") }
-    var msClosing7 by rememberSaveable { mutableStateOf("") }
-    var msOpening7 by rememberSaveable { mutableStateOf("") }
-    var msClosing8 by rememberSaveable { mutableStateOf("") }
-    var msOpening8 by rememberSaveable { mutableStateOf("") }
-    var msClosing9 by rememberSaveable { mutableStateOf("") }
-    var msOpening9 by rememberSaveable { mutableStateOf("") }
-    var msClosing10 by rememberSaveable { mutableStateOf("") }
-    var msOpening10 by rememberSaveable { mutableStateOf("") }
 
-    var hsdClosing1 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening1 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing2 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening2 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing3 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening3 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing4 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening4 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing5 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening5 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing6 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening6 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing7 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening7 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing8 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening8 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing9 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening9 by rememberSaveable { mutableStateOf("") }
-    var hsdClosing10 by rememberSaveable { mutableStateOf("") }
-    var hsdOpening10 by rememberSaveable { mutableStateOf("") }
+    // Dynamic Nozzle States
+    val nozzleReadings = remember { 
+        mutableStateListOf<com.example.database.NozzleReadingEntry>().apply {
+            addAll(selectedNozzles.map { 
+                com.example.database.NozzleReadingEntry(
+                    nozzleId = it.nozzleId,
+                    nozzleName = it.nozzleName,
+                    nozzleNumber = it.nozzleNumber,
+                    nozzleType = it.nozzleType,
+                    tankName = it.tankName,
+                    tankId = it.tankId
+                )
+            })
+        }
+    }
 
-    // Common testing states
-    var msTestingValue by rememberSaveable { mutableStateOf("") }
-    var hsdTestingValue by rememberSaveable { mutableStateOf("") }
-
-    // Common dynamic rates per litre
-    var msRateValue by rememberSaveable { mutableStateOf("") }
-    var hsdRateValue by rememberSaveable { mutableStateOf("") }
+    // Dynamic testing and rate states (Map: Product Name -> Value)
+    val testingValues = remember { mutableStateMapOf<String, String>() }
+    val productRates = remember { mutableStateMapOf<String, Double>() }
+    val pumpProducts = remember { mutableStateListOf<String>() }
 
     var phonePeValue by rememberSaveable { mutableStateOf("") }
     var cardsValue by rememberSaveable { mutableStateOf("") }
@@ -576,36 +552,26 @@ fun CalculatorScreen(
     var notes5 by rememberSaveable { mutableStateOf("") }
     var coinsInput by rememberSaveable { mutableStateOf("") }
     
-    // Custom Udhari Jama - Serialized string as "name1|receiptNo1|product1|litres1|rate1|desc1|amount1;name2|receiptNo2|product2|litres2|rate2|desc2|amount2"
+    // Custom Udhari Jama
     var udhariJamaRawString by rememberSaveable { mutableStateOf("") }
     var tempUdhariJamaName by rememberSaveable { mutableStateOf("") }
     var tempUdhariJamaReceiptNo by rememberSaveable { mutableStateOf("") }
-    var tempUdhariJamaProduct by rememberSaveable { mutableStateOf("MS") }
+    var tempUdhariJamaProduct by rememberSaveable { mutableStateOf("Cash") }
     var tempUdhariJamaLitres by rememberSaveable { mutableStateOf("") }
     var tempUdhariJamaRate by rememberSaveable { mutableStateOf("") }
     var tempUdhariJamaDesc by rememberSaveable { mutableStateOf("") }
     var tempUdhariJamaAmount by rememberSaveable { mutableStateOf("") }
 
-    val extractDouble: (String) -> Double = { input ->
-        val direct = input.toDoubleOrNull()
-        if (direct != null) direct
-        else {
-            val regex = """[0-9]+(?:\.[0-9]+)?""".toRegex()
-            val match = regex.find(input)
-            match?.value?.toDoubleOrNull() ?: 0.0
-        }
-    }
-
-    // Custom Expenses (Kharch) - Serialized string as "desc1|amount1;desc2|amount2"
+    // Custom Expenses (Kharch)
     var kharchRawString by rememberSaveable { mutableStateOf("") }
     var tempKharchDesc by rememberSaveable { mutableStateOf("") }
     var tempKharchAmount by rememberSaveable { mutableStateOf("") }
 
-    // Custom Credit (Udhar) - Serialized string as "name|receiptNo|product|litres|rate|desc|amount"
+    // Custom Credit (Udhar)
     var udharRawString by rememberSaveable { mutableStateOf("") }
     var tempUdharName by rememberSaveable { mutableStateOf("") }
     var tempUdharReceiptNo by rememberSaveable { mutableStateOf("") }
-    var tempUdharProduct by rememberSaveable { mutableStateOf("MS") }
+    var tempUdharProduct by rememberSaveable { mutableStateOf("") }
     var tempUdharLitres by rememberSaveable { mutableStateOf("") }
     var tempUdharRate by rememberSaveable { mutableStateOf("") }
     var tempUdharDesc by rememberSaveable { mutableStateOf("") }
@@ -614,143 +580,99 @@ fun CalculatorScreen(
     var newUdharNameInput by remember { mutableStateOf("") }
 
     val context = LocalContext.current
-    val sharedPrefs = remember(context) { context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE) }
-    var udhariNamesList by remember {
-        mutableStateOf(
-            run {
-                val saved = sharedPrefs.getString("udhari_names_list", "") ?: ""
-                val list = if (saved.isBlank()) {
-                    listOf("Miscellaneous")
-                } else {
-                    saved.split(";").filter { it.isNotBlank() }
-                }
-                if (!list.contains("Miscellaneous")) {
-                    listOf("Miscellaneous") + list
-                } else {
-                    list
-                }
-            }
-        )
-    }
+    var udhariNamesList by remember { mutableStateOf(listOf("Miscellaneous")) }
     var showAddUdhariDialog by remember { mutableStateOf(false) }
     var newUdhariNameInput by remember { mutableStateOf("") }
 
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(date) {
-        val sharedPrefs = context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-        val rateMs = sharedPrefs.getString("rate_ms_$date", "") ?: ""
-        val rateHsd = sharedPrefs.getString("rate_hsd_$date", "") ?: ""
-        msRateValue = rateMs
-        hsdRateValue = rateHsd
-    }
+    LaunchedEffect(date, adminPhone, phone) {
+        if (adminPhone.isNotBlank()) {
+            historyViewModel.setAdminPhone(adminPhone)
+            
+            // 1. Resolve Products (from setup info + actual selected nozzles)
+            val pumpInfo = com.example.database.FirestoreRepository.getPumpInfo(adminPhone)
+            val configuredProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() }?.map { it.trim() } ?: emptyList()
+            val nozzleProducts = selectedNozzles.map { it.nozzleType }.distinct()
+            val allProducts = (configuredProducts + nozzleProducts).distinct()
+            
+            val finalProducts = if (allProducts.isEmpty()) listOf("MS", "HSD") else allProducts
+            pumpProducts.clear()
+            pumpProducts.addAll(finalProducts)
 
-    LaunchedEffect(phone) {
-        if (phone.isNotEmpty()) {
-            for (i in 0 until msNozzleCount) {
-                val label = msNozzleLabels.getOrNull(i) ?: "MS Nozzle ${i + 1}"
-                val lastMs = historyViewModel.getLatestMsReadingForNozzle(label, phone)
-                val initialVal = historyViewModel.getInitialReadingForNozzle(label, phone)
-                val openingVal = lastMs?.closingReading?.toString() ?: if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
-                when (i) {
-                    0 -> msOpening1 = openingVal
-                    1 -> msOpening2 = openingVal
-                    2 -> msOpening3 = openingVal
-                    3 -> msOpening4 = openingVal
-                    4 -> msOpening5 = openingVal
-                    5 -> msOpening6 = openingVal
-                    6 -> msOpening7 = openingVal
-                    7 -> msOpening8 = openingVal
-                    8 -> msOpening9 = openingVal
-                    9 -> msOpening10 = openingVal
+            if (tempUdharProduct.isEmpty() && finalProducts.isNotEmpty()) {
+                tempUdharProduct = finalProducts.first()
+            }
+
+            // 2. Load Daily Rates
+            val dailyData = com.example.database.FirestoreRepository.getDailyPumpData(adminPhone, date)
+            finalProducts.forEach { productName ->
+                val pid = generateProductId(productName)
+                val rateObj = dailyData.find { it.productId == pid } 
+                    ?: dailyData.find { isSameProduct(it.productName, productName) }
+                
+                if (rateObj != null) {
+                    productRates[productName] = rateObj.rate
+                }
+                if (!testingValues.containsKey(productName)) {
+                    testingValues[productName] = ""
                 }
             }
 
-            for (j in 0 until hsdNozzleCount) {
-                val label = hsdNozzleLabels.getOrNull(j) ?: "HSD Nozzle ${j + 1}"
-                val lastHsd = historyViewModel.getLatestHsdReadingForNozzle(label, phone)
-                val initialVal = historyViewModel.getInitialReadingForNozzle(label, phone)
-                val openingVal = lastHsd?.closingReading?.toString() ?: if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
-                when (j) {
-                    0 -> hsdOpening1 = openingVal
-                    1 -> hsdOpening2 = openingVal
-                    2 -> hsdOpening3 = openingVal
-                    3 -> hsdOpening4 = openingVal
-                    4 -> hsdOpening5 = openingVal
-                    5 -> hsdOpening6 = openingVal
-                    6 -> hsdOpening7 = openingVal
-                    7 -> hsdOpening8 = openingVal
-                    8 -> hsdOpening9 = openingVal
-                    9 -> hsdOpening10 = openingVal
+            // 3. Load Opening Readings (Observe history changes to fill accurately)
+            // We launch a collection to ensure we get data even if it arrives slightly later
+            launch {
+                combine(
+                    historyViewModel.allGeneralNozzleReadings,
+                    historyViewModel.allMsNozzleReadings,
+                    historyViewModel.allHsdNozzleReadings
+                ) { gen: List<GeneralNozzleReading>, ms: List<MsNozzleReading>, hsd: List<HsdNozzleReading> ->
+                    Triple(gen, ms, hsd)
+                }.collect { (genReadings, msReadings, hsdReadings) ->
+                    nozzleReadings.forEachIndexed { index, nozzle ->
+                        val rate = productRates.entries.find { isSameProduct(it.key, nozzle.nozzleType) }?.value ?: 0.0
+                        
+                        // Smart Opening Retrieval Logic
+                        // Tier 1: Latest on selected date
+                        val dayGen = genReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                        val dayMs = msReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                        val dayHsd = hsdReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                        
+                        val latestDayReading = listOfNotNull(dayGen?.closingReading, dayMs?.closingReading, dayHsd?.closingReading).firstOrNull()
+
+                        var openingVal: Double? = latestDayReading
+                        
+                        // Tier 2: Absolute latest in history (if no entry today)
+                        if (openingVal == null) {
+                            val histGen = genReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                            val histMs = msReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                            val histHsd = hsdReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
+                            
+                            openingVal = listOfNotNull(histGen?.closingReading, histMs?.closingReading, histHsd?.closingReading).firstOrNull()
+                        }
+
+                        // Tier 3: Fallback to initialReading from setup
+                        val openingValStr = if (openingVal != null) {
+                            if (openingVal % 1.0 == 0.0) openingVal.toLong().toString() else openingVal.toString()
+                        } else {
+                            val initialVal = historyViewModel.getInitialReadingForNozzle(nozzle.nozzleName, adminPhone)
+                            if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
+                        }
+
+                        // Update list if currently empty (to avoid overwriting user entry during shift)
+                        if (nozzleReadings[index].openingReading.isEmpty()) {
+                            nozzleReadings[index] = nozzleReadings[index].copy(rate = rate, openingReading = openingValStr)
+                        } else {
+                            // Just update rate
+                            nozzleReadings[index] = nozzleReadings[index].copy(rate = rate)
+                        }
+                    }
                 }
             }
-        }
-    }
-
-    // Helpers to easily access they by index
-    val msClosings = listOf(msClosing1, msClosing2, msClosing3, msClosing4, msClosing5, msClosing6, msClosing7, msClosing8, msClosing9, msClosing10)
-    val msOpenings = listOf(msOpening1, msOpening2, msOpening3, msOpening4, msOpening5, msOpening6, msOpening7, msOpening8, msOpening9, msOpening10)
-    val hsdClosings = listOf(hsdClosing1, hsdClosing2, hsdClosing3, hsdClosing4, hsdClosing5, hsdClosing6, hsdClosing7, hsdClosing8, hsdClosing9, hsdClosing10)
-    val hsdOpenings = listOf(hsdOpening1, hsdOpening2, hsdOpening3, hsdOpening4, hsdOpening5, hsdOpening6, hsdOpening7, hsdOpening8, hsdOpening9, hsdOpening10)
-
-    fun updateMsClosing(index: Int, value: String) {
-        when (index) {
-            0 -> msClosing1 = value
-            1 -> msClosing2 = value
-            2 -> msClosing3 = value
-            3 -> msClosing4 = value
-            4 -> msClosing5 = value
-            5 -> msClosing6 = value
-            6 -> msClosing7 = value
-            7 -> msClosing8 = value
-            8 -> msClosing9 = value
-            9 -> msClosing10 = value
-        }
-    }
-
-    fun updateMsOpening(index: Int, value: String) {
-        when (index) {
-            0 -> msOpening1 = value
-            1 -> msOpening2 = value
-            2 -> msOpening3 = value
-            3 -> msOpening4 = value
-            4 -> msOpening5 = value
-            5 -> msOpening6 = value
-            6 -> msOpening7 = value
-            7 -> msOpening8 = value
-            8 -> msOpening9 = value
-            9 -> msOpening10 = value
-        }
-    }
-
-    fun updateHsdClosing(index: Int, value: String) {
-        when (index) {
-            0 -> hsdClosing1 = value
-            1 -> hsdClosing2 = value
-            2 -> hsdClosing3 = value
-            3 -> hsdClosing4 = value
-            4 -> hsdClosing5 = value
-            5 -> hsdClosing6 = value
-            6 -> hsdClosing7 = value
-            7 -> hsdClosing8 = value
-            8 -> hsdClosing9 = value
-            9 -> hsdClosing10 = value
-        }
-    }
-
-    fun updateHsdOpening(index: Int, value: String) {
-        when (index) {
-            0 -> hsdOpening1 = value
-            1 -> hsdOpening2 = value
-            2 -> hsdOpening3 = value
-            3 -> hsdOpening4 = value
-            4 -> hsdOpening5 = value
-            5 -> hsdOpening6 = value
-            6 -> hsdOpening7 = value
-            7 -> hsdOpening8 = value
-            8 -> hsdOpening9 = value
-            9 -> hsdOpening10 = value
+            
+            udhariNamesList = com.example.database.FirestoreRepository.getUdhariNames(adminPhone)
         }
     }
 
@@ -855,35 +777,43 @@ fun CalculatorScreen(
     }
     val totalUdhar = udharList.sumOf { it.amount }
 
-    // Calculations
-    val activeMsNozzles = (0 until msNozzleCount).map { i ->
-        val closing = msClosings[i].toDoubleOrNull() ?: 0.0
-        val opening = msOpenings[i].toDoubleOrNull() ?: 0.0
-        val sale = closing - opening
-        Triple(closing, opening, sale)
+    // Dynamic Calculations per Product
+    val productSummaries = pumpProducts.associate { productName ->
+        val nozzles = nozzleReadings.filter { isSameProduct(it.nozzleType, productName) }
+        val grossSale = nozzles.sumOf { it.salesQuantity }
+        val totalOpening = nozzles.sumOf { it.openingReading.toDoubleOrNull() ?: 0.0 }
+        val totalClosing = nozzles.sumOf { it.closingReading.toDoubleOrNull() ?: 0.0 }
+        
+        val testing = testingValues[productName]?.toDoubleOrNull() ?: 0.0
+        val netSale = (grossSale - testing).coerceAtLeast(0.0)
+        
+        // Find rate using productId generation for maximum consistency
+        val pid = generateProductId(productName)
+        val rate = productRates[productName] ?: 0.0
+        
+        val calculatedSalesAmount = grossSale * rate
+        val reconciledSalesAmount = netSale * rate
+        
+        productName to object {
+            val nozzles = nozzles
+            val totalOpening = totalOpening
+            val totalClosing = totalClosing
+            val grossSale = grossSale
+            val testing = testing
+            val netSale = netSale
+            val rate = rate
+            val calculatedSalesAmount = calculatedSalesAmount
+            val reconciledSalesAmount = reconciledSalesAmount
+        }
     }
-    val msGrossSale = activeMsNozzles.sumOf { it.third }
-    val msRate = msRateValue.toDoubleOrNull() ?: 0.0
-    val msTesting = msTestingValue.toDoubleOrNull() ?: 0.0
-    val msNetSale = msGrossSale - msTesting
-    val msSalesAmount = msNetSale * msRate
 
-    val activeHsdNozzles = (0 until hsdNozzleCount).map { i ->
-        val closing = hsdClosings[i].toDoubleOrNull() ?: 0.0
-        val opening = hsdOpenings[i].toDoubleOrNull() ?: 0.0
-        val sale = closing - opening
-        Triple(closing, opening, sale)
-    }
-    val hsdGrossSale = activeHsdNozzles.sumOf { it.third }
-    val hsdRate = hsdRateValue.toDoubleOrNull() ?: 0.0
-    val hsdTesting = hsdTestingValue.toDoubleOrNull() ?: 0.0
-    val hsdNetSale = hsdGrossSale - hsdTesting
-    val hsdSalesAmount = hsdNetSale * hsdRate
-
-    val grandActualTotal = msGrossSale + hsdGrossSale
-    val totalTesting = msTesting + hsdTesting
-    val finalResult = grandActualTotal - totalTesting
-    val grandTotal = msSalesAmount + hsdSalesAmount + totalUdhariJama
+    val grandActualTotalLitres = nozzleReadings.sumOf { it.salesQuantity }
+    val totalTestingLitres = productSummaries.values.sumOf { it.testing }
+    val finalNetLitres = (grandActualTotalLitres - totalTestingLitres).coerceAtLeast(0.0)
+    
+    val totalFuelSalesAmount = productSummaries.values.sumOf { it.reconciledSalesAmount }
+    val grandTotal = totalFuelSalesAmount + totalUdhariJama
+    
     val phonePeAmount = phonePeValue.toDoubleOrNull() ?: 0.0
     val cardsAmount = cardsValue.toDoubleOrNull() ?: 0.0
     val cashSubmittedAmount = cashSubmittedValue.toDoubleOrNull() ?: 0.0
@@ -900,6 +830,12 @@ fun CalculatorScreen(
     val coinsAmt = coinsInput.toDoubleOrNull() ?: 0.0
 
     val actualCashInHand = (count500 * 500) + (count200 * 200) + (count100 * 100) + (count50 * 50) + (count20 * 20) + (count10 * 10) + (count5 * 5) + coinsAmt
+
+    val missingRateProducts = nozzleReadings
+        .groupBy { it.nozzleType }
+        .filter { it.value.any { nozzle -> nozzle.rate <= 0.0 } }
+        .keys
+        .toList()
 
     val cashDiscrepancy = actualCashInHand - finalNetCash
 
@@ -924,12 +860,10 @@ fun CalculatorScreen(
     }
 
     fun clearAllInputs() {
-        msClosing1 = ""; msOpening1 = ""; msClosing2 = ""; msOpening2 = ""; msClosing3 = ""; msOpening3 = ""; msClosing4 = ""; msOpening4 = ""; msClosing5 = ""; msOpening5 = ""; msClosing6 = ""; msOpening6 = ""; msClosing7 = ""; msOpening7 = ""; msClosing8 = ""; msOpening8 = ""; msClosing9 = ""; msOpening9 = ""; msClosing10 = ""; msOpening10 = ""
-        hsdClosing1 = ""; hsdOpening1 = ""; hsdClosing2 = ""; hsdOpening2 = ""; hsdClosing3 = ""; hsdOpening3 = ""; hsdClosing4 = ""; hsdOpening4 = ""; hsdClosing5 = ""; hsdOpening5 = ""; hsdClosing6 = ""; hsdOpening6 = ""; hsdClosing7 = ""; hsdOpening7 = ""; hsdClosing8 = ""; hsdOpening8 = ""; hsdClosing9 = ""; hsdOpening9 = ""; hsdClosing10 = ""; hsdOpening10 = ""
-        msRateValue = ""
-        hsdRateValue = ""
-        msTestingValue = ""
-        hsdTestingValue = ""
+        nozzleReadings.forEachIndexed { index, nozzle ->
+            nozzleReadings[index] = nozzle.copy(closingReading = "")
+        }
+        testingValues.clear()
         phonePeValue = ""
         cardsValue = ""
         cashSubmittedValue = ""
@@ -970,63 +904,44 @@ fun CalculatorScreen(
         sb.append("Meter No: ${meterNo.ifEmpty { "N/A" }}\n")
         sb.append("-----------------------------\n")
         
-        val sharedPrefs = context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-        val dMs = sharedPrefs.getString("density_ms_$date", "") ?: ""
-        val dHsd = sharedPrefs.getString("density_hsd_$date", "") ?: ""
-        val sMs = sharedPrefs.getString("stock_ms_$date", "") ?: ""
-        val sHsd = sharedPrefs.getString("stock_hsd_$date", "") ?: ""
-        val rMs = if (msRateValue.isNotBlank()) msRateValue else (sharedPrefs.getString("rate_ms_$date", "") ?: "")
-        val rHsd = if (hsdRateValue.isNotBlank()) hsdRateValue else (sharedPrefs.getString("rate_hsd_$date", "") ?: "")
-
-        sb.append("DAILY PARAMETERS:\n")
-        sb.append("  MS Petrol:\n")
-        sb.append("    Rate: ₹${if (rMs.isNotBlank()) rMs else "N/A"}/L\n")
-        sb.append("    Density: ${if (dMs.isNotBlank()) "$dMs kg/m³" else "N/A"}\n")
-        sb.append("    Opening Stock: ${if (sMs.isNotBlank()) "$sMs L" else "N/A"}\n")
-        sb.append("  HSD Diesel:\n")
-        sb.append("    Rate: ₹${if (rHsd.isNotBlank()) rHsd else "N/A"}/L\n")
-        sb.append("    Density: ${if (dHsd.isNotBlank()) "$dHsd kg/m³" else "N/A"}\n")
-        sb.append("    Opening Stock: ${if (sHsd.isNotBlank()) "$sHsd L" else "N/A"}\n")
+        sb.append("NOZZLE READINGS:\n")
+        nozzleReadings.groupBy { it.nozzleType }.forEach { (product, nozzles) ->
+            sb.append("\n$product:\n")
+            nozzles.forEach { nozzle ->
+                sb.append("  ${nozzle.nozzleName} (#${nozzle.nozzleNumber}):\n")
+                sb.append("    Op: ${nozzle.openingReading} Cl: ${nozzle.closingReading}\n")
+                sb.append("    Gross Sale: ${formatDouble(nozzle.salesQuantity)} L\n")
+            }
+        }
+        
+        sb.append("\nPRODUCT SUMMARIES:\n")
+        productSummaries.forEach { (product, s) ->
+            sb.append("\n$product:\n")
+            sb.append("  Total Nozzles: ${s.nozzles.size}\n")
+            sb.append("  Opening: ${formatDouble(s.totalOpening)} | Closing: ${formatDouble(s.totalClosing)}\n")
+            sb.append("  Gross Sales Qty: ${formatDouble(s.grossSale)} L\n")
+            sb.append("  Testing: -${formatDouble(s.testing)} L\n")
+            sb.append("  Net Sales (Reconciled): ${formatDouble(s.netSale)} L\n")
+            sb.append("  Rate per Liter: ₹${formatDouble(s.rate)}\n")
+            sb.append("  Calculated Sales Amount: ₹${formatDouble(s.calculatedSalesAmount)}\n")
+            sb.append("  Reconciled Sales Amount: ₹${formatDouble(s.reconciledSalesAmount)}\n")
+        }
+        
+        sb.append("\nFINANCIAL SUMMARY:\n")
+        sb.append("  Total Fuel Sales: ₹${formatDouble(totalFuelSalesAmount)}\n")
+        sb.append("  Recoveries (Jama): +₹${formatDouble(totalUdhariJama)}\n")
+        sb.append("  Grand Total: ₹${formatDouble(grandTotal)}\n")
+        sb.append("-----------------------------\n")
+        sb.append("  Expected Net Cash: ₹${formatDouble(finalNetCash)}\n")
+        sb.append("  Actual Cash in Hand: ₹${formatDouble(actualCashInHand)}\n")
+        sb.append("  Discrepancy (Farak): ₹${formatDouble(cashDiscrepancy)}\n")
         sb.append("-----------------------------\n")
         
-        activeMsNozzles.forEachIndexed { index, (closing, opening, sale) ->
-            val label = msNozzleLabels.getOrNull(index) ?: "MS Noz ${index + 1}"
-            sb.append("$label: Op:${formatDouble(opening)} Cl:${formatDouble(closing)}\n")
-            sb.append("  Gross Sale: ${formatDouble(sale)} L\n")
-        }
-        
-        sb.append("MS TOTALS:\n")
-        sb.append("  MS Gross Sale: ${formatDouble(msGrossSale)} L\n")
-        if (msTesting > 0.0) {
-            sb.append("  MS Testing Deduction: -${formatDouble(msTesting)} L\n")
-        }
-        sb.append("  MS Net Sales: ${formatDouble(msNetSale)} L @ ₹${formatDouble(msRate)}/L\n")
-        sb.append("  MS Sales Value: ₹${formatDouble(msSalesAmount)}\n\n")
-        
-        activeHsdNozzles.forEachIndexed { index, (closing, opening, sale) ->
-            val label = hsdNozzleLabels.getOrNull(index) ?: "HSD Noz ${index + 1}"
-            sb.append("$label: Op:${formatDouble(opening)} Cl:${formatDouble(closing)}\n")
-            sb.append("  Gross Sale: ${formatDouble(sale)} L\n")
-        }
-        
-        sb.append("HSD TOTALS:\n")
-        sb.append("  HSD Gross Sale: ${formatDouble(hsdGrossSale)} L\n")
-        if (hsdTesting > 0.0) {
-            sb.append("  HSD Testing Deduction: -${formatDouble(hsdTesting)} L\n")
-        }
-        sb.append("  HSD Net Sales: ${formatDouble(hsdNetSale)} L @ ₹${formatDouble(hsdRate)}/L\n")
-        sb.append("  HSD Sales Value: ₹${formatDouble(hsdSalesAmount)}\n")
-        
         sb.append("-----------------------------\n")
-        sb.append("Grand Total Vol (Gross): ${formatDouble(grandActualTotal)} L\n")
-        if (totalTesting > 0.0) {
-            sb.append("Total Testing Deduction: -${formatDouble(totalTesting)} L\n")
+        productSummaries.forEach { (product, s) ->
+            sb.append("$product Reconciled Sales Value: ₹${formatDouble(s.reconciledSalesAmount)}\n")
         }
-        sb.append("Net Sales Volume (Final): ${formatDouble(finalResult)} L\n")
-        sb.append("-----------------------------\n")
-        sb.append("MS Total Sales Value: ₹${formatDouble(msSalesAmount)}\n")
-        sb.append("HSD Total Sales Value: ₹${formatDouble(hsdSalesAmount)}\n")
-        sb.append("Total Sales (MS+HSD): ₹${formatDouble(msSalesAmount + hsdSalesAmount)}\n")
+        sb.append("Total Fuel Sales: ₹${formatDouble(totalFuelSalesAmount)}\n")
         if (udhariJamaList.isNotEmpty()) {
             sb.append("Udhari Jama (Recoveries):\n")
             udhariJamaList.sortedBy { it.name.lowercase() }.forEach { item ->
@@ -1100,39 +1015,61 @@ fun CalculatorScreen(
         val formattedMeterNo = meterNo.ifEmpty { "N/A" }
 
         val sharedPrefs = context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-        val densityMs = sharedPrefs.getString("density_ms_$date", "") ?: ""
-        val densityHsd = sharedPrefs.getString("density_hsd_$date", "") ?: ""
-        val stockMs = sharedPrefs.getString("stock_ms_$date", "") ?: ""
-        val stockHsd = sharedPrefs.getString("stock_hsd_$date", "") ?: ""
-        val receiptMs = sharedPrefs.getString("receipt_ms_$date", "") ?: ""
-        val receiptHsd = sharedPrefs.getString("receipt_hsd_$date", "") ?: ""
         
-        val rMs = if (msRateValue.isNotBlank()) "₹$msRateValue" else (sharedPrefs.getString("rate_ms_$date", "")?.let { if (it.isNotBlank()) "₹$it" else "N/A" } ?: "N/A")
-        val rHsd = if (hsdRateValue.isNotBlank()) "₹$hsdRateValue" else (sharedPrefs.getString("rate_hsd_$date", "")?.let { if (it.isNotBlank()) "₹$it" else "N/A" } ?: "N/A")
-
-        val msRowsHtml = activeMsNozzles.mapIndexed { index, (closing, opening, sale) ->
-            val label = msNozzleLabels.getOrNull(index) ?: "Noz ${index + 1} (MS)"
+        val productParametersHtml = pumpProducts.map { product ->
+            val r = productRates[product]?.let { "₹$it" } ?: "N/A"
+            val density = sharedPrefs.getString("density_${product.lowercase().replace(" ", "_")}_$date", "") ?: "N/A"
+            val stock = sharedPrefs.getString("stock_${product.lowercase().replace(" ", "_")}_$date", "") ?: "N/A"
+            val receipt = sharedPrefs.getString("receipt_${product.lowercase().replace(" ", "_")}_$date", "") ?: "0.0"
             """
             <tr>
-                <td>$label</td>
-                <td>${formatDouble(opening)}</td>
-                <td>${formatDouble(closing)}</td>
-                <td class="bold">${formatDouble(sale)} L</td>
+                <td><strong>$product</strong></td>
+                <td class="num">$r</td>
+                <td class="num">$density</td>
+                <td class="num">${if (stock != "N/A") "$stock L" else "N/A"}</td>
+                <td class="num">${if (receipt != "0.0") "$receipt L" else "0.0 L"}</td>
+            </tr>
+            """.trimIndent()
+        }.joinToString("")
+
+        val nozzleReadingsHtml = nozzleReadings.map { nozzle ->
+            """
+            <tr>
+                <td>${nozzle.nozzleName} (#${nozzle.nozzleNumber})</td>
+                <td>${formatDouble(nozzle.openingReading.toDoubleOrNull() ?: 0.0)}</td>
+                <td>${formatDouble(nozzle.closingReading.toDoubleOrNull() ?: 0.0)}</td>
+                <td class="bold">${formatDouble(nozzle.salesQuantity)} L</td>
                 <td class="num">&mdash;</td>
             </tr>
             """.trimIndent()
         }.joinToString("")
 
-        val hsdRowsHtml = activeHsdNozzles.mapIndexed { index, (closing, opening, sale) ->
-            val label = hsdNozzleLabels.getOrNull(index) ?: "Noz ${index + 1} (HSD)"
+        val productSummariesHtml = productSummaries.map { (product, s) ->
             """
             <tr>
-                <td>$label</td>
-                <td>${formatDouble(opening)}</td>
-                <td>${formatDouble(closing)}</td>
-                <td class="bold">${formatDouble(sale)} L</td>
-                <td class="num">&mdash;</td>
+                <td colspan="2"><strong>$product RECONCILIATION</strong></td>
             </tr>
+            <tr>
+                <td>$product Meter Gross Sum</td>
+                <td class="num">${formatDouble(s.grossSale)} L</td>
+            </tr>
+            <tr>
+                <td>$product Testing Deduction</td>
+                <td class="num">-${formatDouble(s.testing)} L</td>
+            </tr>
+            <tr>
+                <td>Net $product Sales (L)</td>
+                <td class="num">${formatDouble(s.netSale)} L</td>
+            </tr>
+            <tr>
+                <td>Rate per Liter</td>
+                <td class="num">₹${formatDouble(s.rate)}/L</td>
+            </tr>
+            <tr class="highlight">
+                <td>$product Reconciled Sales Amount</td>
+                <td class="num"><strong>₹${formatDouble(s.reconciledSalesAmount)}</strong></td>
+            </tr>
+            <tr><td colspan="2" style="border:none; height:5px;"></td></tr>
             """.trimIndent()
         }.joinToString("")
 
@@ -1372,20 +1309,7 @@ fun CalculatorScreen(
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr>
-                                        <td><strong>MS Petrol</strong></td>
-                                        <td class="num">$rMs</td>
-                                        <td class="num">${if (densityMs.isNotBlank()) densityMs else "N/A"}</td>
-                                        <td class="num">${if (stockMs.isNotBlank()) "$stockMs L" else "N/A"}</td>
-                                        <td class="num">${if (receiptMs.isNotBlank()) "$receiptMs L" else "0.0 L"}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>HSD Diesel</strong></td>
-                                        <td class="num">$rHsd</td>
-                                        <td class="num">${if (densityHsd.isNotBlank()) densityHsd else "N/A"}</td>
-                                        <td class="num">${if (stockHsd.isNotBlank()) "$stockHsd L" else "N/A"}</td>
-                                        <td class="num">${if (receiptHsd.isNotBlank()) "$receiptHsd L" else "0.0 L"}</td>
-                                    </tr>
+                                    $productParametersHtml
                                 </tbody>
                             </table>
                         </div>
@@ -1404,8 +1328,7 @@ fun CalculatorScreen(
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    $msRowsHtml
-                                    $hsdRowsHtml
+                                    $nozzleReadingsHtml
                                 </tbody>
                             </table>
                         </div>
@@ -1415,33 +1338,10 @@ fun CalculatorScreen(
                             <div class="card-caption">FUEL RECONCILIATION & TESTING SUMMARY</div>
                             <table>
                                 <tbody>
-                                    <tr>
-                                        <td>MS Petrol Meter Gross Sum</td>
-                                        <td class="num">${formatDouble(msGrossSale)} L</td>
-                                    </tr>
-                                    <tr>
-                                        <td>MS Testing Deduction</td>
-                                        <td class="num">-${formatDouble(msTesting)} L</td>
-                                    </tr>
-                                    <tr class="highlight">
-                                        <td>Net MS Petrol Sales (L) @ ₹${formatDouble(msRate)}/L</td>
-                                        <td class="num">${formatDouble(msNetSale)} L &nbsp;|&nbsp; <strong>₹${formatDouble(msSalesAmount)}</strong></td>
-                                    </tr>
-                                    <tr>
-                                        <td>HSD Diesel Meter Gross Sum</td>
-                                        <td class="num">${formatDouble(hsdGrossSale)} L</td>
-                                    </tr>
-                                    <tr>
-                                        <td>HSD Testing Deduction</td>
-                                        <td class="num">-${formatDouble(hsdTesting)} L</td>
-                                    </tr>
-                                    <tr class="highlight">
-                                        <td>Net HSD Diesel Sales (L) @ ₹${formatDouble(hsdRate)}/L</td>
-                                        <td class="num">${formatDouble(hsdNetSale)} L &nbsp;|&nbsp; <strong>₹${formatDouble(hsdSalesAmount)}</strong></td>
-                                    </tr>
+                                    $productSummariesHtml
                                     <tr class="bold-total">
-                                        <td>COMBINED BASE FUEL VOLUME (NET)</td>
-                                        <td class="num">${formatDouble(finalResult)} L</td>
+                                        <td>COMBINED STATION FUEL VOLUME (NET)</td>
+                                        <td class="num">${formatDouble(finalNetLitres)} L</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1475,17 +1375,17 @@ fun CalculatorScreen(
                             <div class="card-caption">CASH FLOW RECONCILIATION STATEMENT</div>
                             <table>
                                 <tbody>
-                                    <tr>
-                                        <td>&nbsp;&bull;&nbsp; MS Petrol Sales (Net)</td>
-                                        <td class="num">₹${formatDouble(msSalesAmount)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>&nbsp;&bull;&nbsp; HSD Diesel Sales (Net)</td>
-                                        <td class="num">₹${formatDouble(hsdSalesAmount)}</td>
-                                    </tr>
+                                    ${pumpProducts.map { product ->
+                                        """
+                                        <tr>
+                                            <td>&nbsp;&bull;&nbsp; $product Sales (Reconciled)</td>
+                                            <td class="num">₹${formatDouble(productSummaries[product]?.reconciledSalesAmount ?: 0.0)}</td>
+                                        </tr>
+                                        """.trimIndent()
+                                    }.joinToString("")}
                                     <tr style="font-weight: bold; background-color: #fcfcfc;">
                                         <td>Base Reconciled Fuel Sales Value</td>
-                                        <td class="num">₹${formatDouble(msSalesAmount + hsdSalesAmount)}</td>
+                                        <td class="num">₹${formatDouble(totalFuelSalesAmount)}</td>
                                     </tr>
                                     $tableUdhariJamaHtml
                                     <tr class="highlight">
@@ -1636,42 +1536,32 @@ fun CalculatorScreen(
 
                     Button(
                         onClick = {
-                            for (i in 0 until msNozzleCount) {
-                                val closingStr = msClosings.getOrNull(i)?.trim().orEmpty()
-                                if (closingStr.isEmpty()) {
-                                    val label = msNozzleLabels.getOrNull(i) ?: "MS Nozzle ${i + 1}"
-                                    Toast.makeText(
-                                        context,
-                                        LanguageManager.translate(
-                                            "Please enter closing reading for $label!",
-                                            "कृपया $label के लिए अंतिम रीडिंग दर्ज करें!"
-                                        ),
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    return@Button
-                                }
+                            if (missingRateProducts.isNotEmpty()) {
+                                Toast.makeText(
+                                    context,
+                                    "Cannot save: Fuel rate missing for ${missingRateProducts.joinToString(", ")}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@Button
                             }
-                            for (j in 0 until hsdNozzleCount) {
-                                val closingStr = hsdClosings.getOrNull(j)?.trim().orEmpty()
-                                if (closingStr.isEmpty()) {
-                                    val label = hsdNozzleLabels.getOrNull(j) ?: "HSD Nozzle ${j + 1}"
-                                    Toast.makeText(
-                                        context,
-                                        LanguageManager.translate(
-                                            "Please enter closing reading for $label!",
-                                            "कृपया $label के लिए अंतिम रीडिंग दर्ज करें!"
-                                        ),
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    return@Button
-                                }
+                            
+                            val missingClosings = nozzleReadings.filter { it.closingReading.trim().isEmpty() }
+                            if (missingClosings.isNotEmpty()) {
+                                Toast.makeText(
+                                    context,
+                                    "Please enter closing reading for: ${missingClosings.joinToString { it.nozzleName }}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                return@Button
                             }
+                            
                             showSaveConfirmDialog = true
                         },
                         modifier = Modifier
                             .weight(1f)
                             .height(50.dp)
                             .testTag("four_nozzle_save_audit_button"),
+                        enabled = missingRateProducts.isEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -1770,108 +1660,96 @@ fun CalculatorScreen(
                 }
             }
 
-            if (msNozzleCount > 0) {
-                // Section Title for MS Nozzles
-                Text(
-                    text = "Motor Spirit (MS) Nozzles ($msNozzleCount)",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                )
-
-                (0 until msNozzleCount).forEach { index ->
-                    val closing = msClosings[index]
-                    val opening = msOpenings[index]
-                    val triple = activeMsNozzles.getOrNull(index) ?: Triple(0.0, 0.0, 0.0)
-                    val actualSale = triple.third
-                    val salesAmount = actualSale * (msRateValue.toDoubleOrNull() ?: 0.0)
-
-                    FourNozzleCard(
-                        title = msNozzleLabels.getOrNull(index) ?: "MS Nozzle ${index + 1}",
-                        closingVal = closing,
-                        openingVal = opening,
-                        actualSale = actualSale,
-                        salesAmount = salesAmount,
-                        onClosingChanged = { updateMsClosing(index, sanitizeInput(it)) },
-                        onOpeningChanged = { updateMsOpening(index, sanitizeInput(it)) },
-                        closingTag = "ms_nozzle_${index + 1}_closing_input",
-                        openingTag = "ms_nozzle_${index + 1}_opening_input",
-                        actualSaleTag = "ms_nozzle_${index + 1}_sale_display",
-                        salesAmountTag = "ms_nozzle_${index + 1}_sales_amount_display",
-                        badgeColor = MaterialTheme.colorScheme.primary,
-                        badgeTextColor = MaterialTheme.colorScheme.onPrimary
-                    )
+            if (missingRateProducts.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "Fuel rate is not configured for ${missingRateProducts.joinToString(", ")} for the selected date.",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        )
+                    }
                 }
-
-                // MS Testing & Total Summary
-                ProductTestingSummaryCard(
-                    title = "Motor Spirit (MS)",
-                    grossSale = msGrossSale,
-                    testingVal = msTestingValue,
-                    onTestingChanged = { msTestingValue = sanitizeInput(it) },
-                    rateVal = msRateValue,
-                    onRateChanged = { msRateValue = sanitizeInput(it) },
-                    netSale = msNetSale,
-                    totalSalesAmount = msSalesAmount,
-                    badgeColor = MaterialTheme.colorScheme.primary,
-                    badgeTextColor = MaterialTheme.colorScheme.onPrimary,
-                    testingTag = "ms_testing_input",
-                    rateTag = "ms_rate_input",
-                    netSaleTag = "ms_net_sale_display",
-                    totalSalesAmountTag = "ms_total_sales_amount_display"
-                )
             }
 
-            if (hsdNozzleCount > 0) {
-                // Section Title for HSD Nozzles
-                Text(
-                    text = "High Speed Diesel (HSD) Nozzles ($hsdNozzleCount)",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
-                )
+            pumpProducts.forEach { product ->
+                val nozzles = nozzleReadings.filter { isSameProduct(it.nozzleType, product) }
+                if (nozzles.isNotEmpty()) {
+                    val isMs = isSameProduct(product, "MS")
+                    val isHsd = isSameProduct(product, "HSD")
+                    
+                    val badgeColor = when {
+                        isMs -> MaterialTheme.colorScheme.primary
+                        isHsd -> MaterialTheme.colorScheme.tertiary
+                        else -> Color(0xFF8B5CF6) // Premium/Other
+                    }
+                    val badgeTextColor = Color.White
+                    
+                    Text(
+                        text = "$product Nozzles (${nozzles.size})",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = badgeColor,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    )
 
-                (0 until hsdNozzleCount).forEach { index ->
-                    val closing = hsdClosings[index]
-                    val opening = hsdOpenings[index]
-                    val triple = activeHsdNozzles.getOrNull(index) ?: Triple(0.0, 0.0, 0.0)
-                    val actualSale = triple.third
-                    val salesAmount = actualSale * (hsdRateValue.toDoubleOrNull() ?: 0.0)
+                    nozzles.forEach { nozzle ->
+                        val actualIndex = nozzleReadings.indexOfFirst { it.nozzleId == nozzle.nozzleId }
+                        FourNozzleCard(
+                            title = "${nozzle.nozzleName} (#${nozzle.nozzleNumber})",
+                            closingVal = nozzle.closingReading,
+                            openingVal = nozzle.openingReading,
+                            actualSale = nozzle.salesQuantity,
+                            salesAmount = nozzle.salesAmount,
+                            onClosingChanged = { newVal ->
+                                nozzleReadings[actualIndex] = nozzleReadings[actualIndex].copy(closingReading = sanitizeInput(newVal))
+                            },
+                            onOpeningChanged = { newVal ->
+                                nozzleReadings[actualIndex] = nozzleReadings[actualIndex].copy(openingReading = sanitizeInput(newVal))
+                            },
+                            closingTag = "noz_${nozzle.nozzleId}_closing",
+                            openingTag = "noz_${nozzle.nozzleId}_opening",
+                            actualSaleTag = "noz_${nozzle.nozzleId}_sale",
+                            salesAmountTag = "noz_${nozzle.nozzleId}_amt",
+                            badgeColor = badgeColor,
+                            badgeTextColor = badgeTextColor
+                        )
+                    }
 
-                    FourNozzleCard(
-                        title = hsdNozzleLabels.getOrNull(index) ?: "HSD Nozzle ${index + 1}",
-                        closingVal = closing,
-                        openingVal = opening,
-                        actualSale = actualSale,
-                        salesAmount = salesAmount,
-                        onClosingChanged = { updateHsdClosing(index, sanitizeInput(it)) },
-                        onOpeningChanged = { updateHsdOpening(index, sanitizeInput(it)) },
-                        closingTag = "hsd_nozzle_${index + 1}_closing_input",
-                        openingTag = "hsd_nozzle_${index + 1}_opening_input",
-                        actualSaleTag = "hsd_nozzle_${index + 1}_sale_display",
-                        salesAmountTag = "hsd_nozzle_${index + 1}_sales_amount_display",
-                        badgeColor = MaterialTheme.colorScheme.tertiary,
-                        badgeTextColor = MaterialTheme.colorScheme.onTertiary
+                    // Summary for this product (Testing/Rate)
+                    val summary = productSummaries[product]!!
+                    
+                    ProductTestingSummaryCard(
+                        title = product,
+                        grossSale = summary.grossSale,
+                        testingVal = testingValues[product] ?: "",
+                        onTestingChanged = { testingValues[product] = sanitizeInput(it) },
+                        rateVal = if (summary.rate <= 0.0) "Not Configured" else summary.rate.toString(),
+                        onRateChanged = { /* Auto-retrieved */ },
+                        netSale = summary.netSale,
+                        totalSalesAmount = summary.reconciledSalesAmount,
+                        badgeColor = badgeColor,
+                        badgeTextColor = badgeTextColor,
+                        testingTag = "${product}_testing",
+                        rateTag = "${product}_rate",
+                        netSaleTag = "${product}_net",
+                        totalSalesAmountTag = "${product}_total"
                     )
                 }
-
-                // HSD Testing & Total Summary
-                ProductTestingSummaryCard(
-                    title = "High Speed Diesel (HSD)",
-                    grossSale = hsdGrossSale,
-                    testingVal = hsdTestingValue,
-                    onTestingChanged = { hsdTestingValue = sanitizeInput(it) },
-                    rateVal = hsdRateValue,
-                    onRateChanged = { hsdRateValue = sanitizeInput(it) },
-                    netSale = hsdNetSale,
-                    totalSalesAmount = hsdSalesAmount,
-                    badgeColor = MaterialTheme.colorScheme.tertiary,
-                    badgeTextColor = MaterialTheme.colorScheme.onTertiary,
-                    testingTag = "hsd_testing_input",
-                    rateTag = "hsd_rate_input",
-                    netSaleTag = "hsd_net_sale_display",
-                    totalSalesAmountTag = "hsd_total_sales_amount_display"
-                )
             }
 
             // Dynamic Udhari Jama Card below Nozzles
@@ -1948,7 +1826,9 @@ fun CalculatorScreen(
                                                 if (!udhariNamesList.contains(name)) {
                                                     val newList = udhariNamesList + name
                                                     udhariNamesList = newList
-                                                    sharedPrefs.edit().putString("udhari_names_list", newList.joinToString(";")).apply()
+                                                    coroutineScope.launch {
+                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                    }
                                                 }
                                                 tempUdhariJamaName = name
                                                 newUdhariNameInput = ""
@@ -2102,7 +1982,7 @@ fun CalculatorScreen(
                                     udhariJamaRawString = if (udhariJamaRawString.isEmpty()) newItemString else "$udhariJamaRawString;$newItemString"
                                     tempUdhariJamaName = ""
                                     tempUdhariJamaReceiptNo = ""
-                                    tempUdhariJamaProduct = "MS"
+                                    tempUdhariJamaProduct = "Cash"
                                     tempUdhariJamaLitres = ""
                                     tempUdhariJamaRate = ""
                                     tempUdhariJamaDesc = ""
@@ -2224,23 +2104,20 @@ fun CalculatorScreen(
                         )
                     )
 
-                    val baseSalesValue = msSalesAmount + hsdSalesAmount
-                    val baseNetSaleLitres = msNetSale + hsdNetSale
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = LanguageManager.totalSalesMsHsd,
+                            text = LanguageManager.translate("Total Fuel Sales", "कुल ईंधन बिक्री"),
                             style = Modifier.testTag("ms_hsd_sales_title_text").let { 
                                 MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             },
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                         Text(
-                            text = "₹ " + formatDouble(baseSalesValue),
+                            text = "₹ " + formatDouble(totalFuelSalesAmount),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -2250,127 +2127,114 @@ fun CalculatorScreen(
                         )
                     }
 
-                    if (msNozzleCount > 0) {
-                        // MS Petrol Row - Designed clearly and with high contrast
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
+                    // Product-Wise Systematic Reconciliation Table
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Table Header with Horizontal Scroll for narrow screens
+                            val scrollState = androidx.compose.foundation.rememberScrollState()
+                            
+                            Column(modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                                Row(
                                     modifier = Modifier
-                                        .background(
-                                            MaterialTheme.colorScheme.primary,
-                                            shape = RoundedCornerShape(6.dp)
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .widthIn(min = 600.dp)
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .padding(vertical = 10.dp, horizontal = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        text = "MS",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    )
+                                    Text("Product Identity", modifier = Modifier.width(100.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black))
+                                    Text("Opening", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
+                                    Text("Closing", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
+                                    Text("Sales Qty", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
+                                    Text("Rate/L", modifier = Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
+                                    Text("Calc Amt", modifier = Modifier.width(90.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
+                                    Text("Reconciled Amt", modifier = Modifier.width(100.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
                                 }
-                                Column {
-                                    Text(
-                                        text = "MS Petrol Sales",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "${formatDouble(msNetSale)} L @ ₹${formatDouble(msRate)}/L",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "₹ " + formatDouble(msSalesAmount),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            )
-                        }
-                    }
 
-                    if (hsdNozzleCount > 0) {
-                        // HSD Diesel Row - Designed clearly and with high contrast
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            MaterialTheme.colorScheme.tertiary,
-                                            shape = RoundedCornerShape(6.dp)
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "HSD",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onTertiary
-                                        )
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "HSD Diesel Sales",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "${formatDouble(hsdNetSale)} L @ ₹${formatDouble(hsdRate)}/L",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                pumpProducts.forEach { product ->
+                                    val summary = productSummaries[product]
+                                    if (summary != null && summary.nozzles.isNotEmpty()) {
+                                        val isMs = isSameProduct(product, "MS")
+                                        val isHsd = isSameProduct(product, "HSD")
+                                        val productBadgeColor = when {
+                                            isMs -> MaterialTheme.colorScheme.primary
+                                            isHsd -> MaterialTheme.colorScheme.tertiary
+                                            else -> Color(0xFF8B5CF6)
+                                        }
+
+                                        Row(
+                                            modifier = Modifier
+                                                .widthIn(min = 600.dp)
+                                                .padding(vertical = 8.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = product,
+                                                modifier = Modifier.width(100.dp).clickable {
+                                                    // Dynamic link to details
+                                                },
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                color = productBadgeColor
+                                            )
+                                            Text(
+                                                text = formatDouble(summary.totalOpening),
+                                                modifier = Modifier.width(80.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = formatDouble(summary.totalClosing),
+                                                modifier = Modifier.width(80.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = formatDouble(summary.grossSale) + " L",
+                                                modifier = Modifier.width(80.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = formatDouble(summary.rate),
+                                                modifier = Modifier.width(70.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = "₹" + formatDouble(summary.calculatedSalesAmount),
+                                                modifier = Modifier.width(90.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = "₹" + formatDouble(summary.reconciledSalesAmount),
+                                                modifier = Modifier.width(100.dp),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                                                textAlign = TextAlign.End,
+                                                color = productBadgeColor
+                                            )
+                                        }
+                                        HorizontalDivider(modifier = Modifier.widthIn(min = 600.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    } else {
+                                        // Product exists in setup but has no nozzles selected
+                                        Row(
+                                            modifier = Modifier.widthIn(min = 600.dp).padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(product, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+                                            Text(
+                                                text = if (summary?.nozzles?.isEmpty() == true) "⚠ NO NOZZLE DATA MISSING" else "⚠ RATE NOT CONFIGURED",
+                                                style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold),
+                                                modifier = Modifier.weight(1f),
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                            Text(
-                                text = "₹ " + formatDouble(hsdSalesAmount),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            )
                         }
                     }
 
@@ -2385,7 +2249,7 @@ fun CalculatorScreen(
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                         Text(
-                            text = formatDouble(baseNetSaleLitres) + " L",
+                            text = formatDouble(finalNetLitres) + " L",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -2821,7 +2685,9 @@ fun CalculatorScreen(
                                                 if (!udhariNamesList.contains(name)) {
                                                     val newList = udhariNamesList + name
                                                     udhariNamesList = newList
-                                                    sharedPrefs.edit().putString("udhari_names_list", newList.joinToString(";")).apply()
+                                                    coroutineScope.launch {
+                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                    }
                                                 }
                                                 tempUdharName = name
                                                 newUdharNameInput = ""
@@ -2970,7 +2836,7 @@ fun CalculatorScreen(
                                 expanded = productDropdownExpanded,
                                 onDismissRequest = { productDropdownExpanded = false }
                             ) {
-                                listOf("MS", "HSD", "Cash").forEach { prod ->
+                                (pumpProducts + "Cash").forEach { prod ->
                                     DropdownMenuItem(
                                         text = { Text(prod) },
                                         onClick = {
@@ -2981,11 +2847,7 @@ fun CalculatorScreen(
                                                 tempUdharReceiptNo = ""
                                                 tempUdharLitres = ""
                                             } else {
-                                                val newRate = when (prod) {
-                                                    "MS" -> msRateValue
-                                                    "HSD" -> hsdRateValue
-                                                    else -> ""
-                                                }
+                                                val newRate = productRates[prod]?.toString() ?: ""
                                                 tempUdharRate = newRate
                                             }
                                         }
@@ -3111,7 +2973,7 @@ fun CalculatorScreen(
                                     udharRawString = if (udharRawString.isEmpty()) newItemString else "$udharRawString;$newItemString"
                                     tempUdharName = ""
                                     tempUdharReceiptNo = ""
-                                    tempUdharProduct = "MS"
+                                    tempUdharProduct = pumpProducts.firstOrNull() ?: ""
                                     tempUdharLitres = ""
                                     tempUdharRate = ""
                                     tempUdharDesc = ""
@@ -3541,6 +3403,7 @@ fun CalculatorScreen(
                         val report = getSummaryText()
                         val htmlReport = generateA4HtmlReport()
                         historyViewModel.saveAudit(
+                            adminPhone = adminPhone,
                             date = date,
                             caName = caName,
                             meterNo = meterNo,
@@ -3551,125 +3414,35 @@ fun CalculatorScreen(
                             actualCashCollected = actualCashInHand
                         )
 
-                        // Save individual MS nozzle readings to the database
-                        val msReadingsToSave = (0 until msNozzleCount).map { i ->
-                            val label = msNozzleLabels.getOrNull(i) ?: "MS Nozzle ${i + 1}"
-                            val opening = msOpenings.getOrNull(i)?.toDoubleOrNull() ?: 0.0
-                            val closing = msClosings.getOrNull(i)?.toDoubleOrNull() ?: 0.0
-                            MsNozzleReading(
-                                nozzleLabel = label,
-                                openingReading = minOf(opening, closing),
-                                closingReading = maxOf(opening, closing),
-                                testing = msTesting,
+                        // Save individual nozzle readings to the database (Unified General Table)
+                        val generalReadingsToSave = nozzleReadings.map { nozzle ->
+                            val opening = nozzle.openingReading.toDoubleOrNull() ?: 0.0
+                            val closing = nozzle.closingReading.toDoubleOrNull() ?: 0.0
+                            val productName = nozzle.nozzleType
+                            val testingForProduct = testingValues[productName]?.toDoubleOrNull() ?: 0.0
+                            val summary = productSummaries[productName]
+                            
+                            com.example.database.GeneralNozzleReading(
+                                ownerAdminPhone = adminPhone,
+                                productName = productName,
+                                nozzleLabel = nozzle.nozzleName,
+                                openingReading = opening,
+                                closingReading = closing,
+                                testing = testingForProduct,
                                 caName = caName,
                                 phone = phone,
                                 udhar = totalUdhar,
                                 kharch = totalKharch,
                                 udhariJama = totalUdhariJama,
-                                msSales = msSalesAmount,
-                                hsdSales = 0.0,
+                                productSalesAmount = summary?.reconciledSalesAmount ?: 0.0,
                                 date = date
                             )
                         }
-                        historyViewModel.insertMsNozzleReadings(msReadingsToSave)
-
-                        // Save individual HSD nozzle readings to the database
-                        val hsdReadingsToSave = (0 until hsdNozzleCount).map { j ->
-                            val label = hsdNozzleLabels.getOrNull(j) ?: "HSD Nozzle ${j + 1}"
-                            val opening = hsdOpenings.getOrNull(j)?.toDoubleOrNull() ?: 0.0
-                            val closing = hsdClosings.getOrNull(j)?.toDoubleOrNull() ?: 0.0
-                            HsdNozzleReading(
-                                nozzleLabel = label,
-                                openingReading = minOf(opening, closing),
-                                closingReading = maxOf(opening, closing),
-                                testing = hsdTesting,
-                                caName = caName,
-                                phone = phone,
-                                udhar = totalUdhar,
-                                kharch = totalKharch,
-                                udhariJama = totalUdhariJama,
-                                msSales = 0.0,
-                                hsdSales = hsdSalesAmount,
-                                date = date
-                            )
-                        }
-                        historyViewModel.insertHsdNozzleReadings(hsdReadingsToSave)
+                        if (generalReadingsToSave.isNotEmpty()) historyViewModel.insertGeneralNozzleReadings(generalReadingsToSave)
 
                         Toast.makeText(context, "Report Saved to History!", Toast.LENGTH_LONG).show()
 
-                        // Reset all input fields
-                        msClosing1 = ""
-                        msOpening1 = ""
-                        msClosing2 = ""
-                        msOpening2 = ""
-                        msClosing3 = ""
-                        msOpening3 = ""
-                        msClosing4 = ""
-                        msOpening4 = ""
-                        msClosing5 = ""
-                        msOpening5 = ""
-                        msClosing6 = ""
-                        msOpening6 = ""
-                        msClosing7 = ""
-                        msOpening7 = ""
-                        msClosing8 = ""
-                        msOpening8 = ""
-                        msClosing9 = ""
-                        msOpening9 = ""
-                        msClosing10 = ""
-                        msOpening10 = ""
-
-                        hsdClosing1 = ""
-                        hsdOpening1 = ""
-                        hsdClosing2 = ""
-                        hsdOpening2 = ""
-                        hsdClosing3 = ""
-                        hsdOpening3 = ""
-                        hsdClosing4 = ""
-                        hsdOpening4 = ""
-                        hsdClosing5 = ""
-                        hsdOpening5 = ""
-                        hsdClosing6 = ""
-                        hsdOpening6 = ""
-                        hsdClosing7 = ""
-                        hsdOpening7 = ""
-                        hsdClosing8 = ""
-                        hsdOpening8 = ""
-                        hsdClosing9 = ""
-                        hsdOpening9 = ""
-                        hsdClosing10 = ""
-                        hsdOpening10 = ""
-
-                        msTestingValue = ""
-                        hsdTestingValue = ""
-                        msRateValue = ""
-                        hsdRateValue = ""
-                        phonePeValue = ""
-                        cardsValue = ""
-                        cashSubmittedValue = ""
-                        notes500 = ""
-                        notes200 = ""
-                        notes100 = ""
-                        notes50 = ""
-                        notes20 = ""
-                        notes10 = ""
-                        notes5 = ""
-                        coinsInput = ""
-                        udhariJamaRawString = ""
-                        tempUdhariJamaDesc = ""
-                        tempUdhariJamaAmount = ""
-                        kharchRawString = ""
-                        tempKharchDesc = ""
-                        tempKharchAmount = ""
-                        udharRawString = ""
-                        tempUdharName = ""
-                        tempUdharReceiptNo = ""
-                        tempUdharProduct = "MS"
-                        tempUdharLitres = ""
-                        tempUdharRate = ""
-                        tempUdharDesc = ""
-                        tempUdharAmount = ""
-
+                        clearAllInputs()
                         onSaveSuccess?.invoke()
                     }
                 ) {

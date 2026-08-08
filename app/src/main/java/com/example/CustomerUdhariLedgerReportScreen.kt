@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.print.PrintAttributes
 import android.print.PrintManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,7 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.example.database.AppDatabase
 import com.example.database.SavedAudit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -72,19 +72,33 @@ data class CustomerLedger(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CustomerUdhariLedgerReportScreen(
+    adminPhone: String,
     onBack: () -> Unit,
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val db = remember { AppDatabase.getDatabase(context) }
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedCustomerName by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Load audits from database
-    val allAuditsState = db.savedAuditDao().getAllAudits().collectAsState(initial = emptyList())
+    val resetAndBack = {
+        searchQuery = ""
+        selectedCustomerName = null
+        onBack()
+    }
+
+    BackHandler {
+        if (selectedCustomerName != null) {
+            selectedCustomerName = null
+        } else {
+            resetAndBack()
+        }
+    }
+
+    // Load audits from Cloud
+    val allAuditsState = com.example.database.FirestoreRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Parse all transactions from audits
     val parsedTransactions = remember(allAuditsState.value) {
@@ -228,7 +242,7 @@ fun CustomerUdhariLedgerReportScreen(
                             if (selectedCustomerName != null) {
                                 selectedCustomerName = null
                             } else {
-                                onBack()
+                                resetAndBack()
                             }
                         },
                         modifier = Modifier.testTag("ledger_report_back")

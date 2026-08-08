@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "saved_audits")
 data class SavedAudit(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val ownerAdminPhone: String, // Multi-tenancy isolation
     val date: String,
     val caName: String,
     val meterNo: String,

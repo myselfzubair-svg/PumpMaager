@@ -34,7 +34,22 @@ object LanguageManager {
     val nozzle4Desc get() = translate("Full pump shift report calculations, nozzle labels and test deductions.", "नोज़ल लेबल और टेस्टिंग कटौती के साथ पूर्ण पंप शिफ्ट कैलकुलेशन और मिलान।")
     val fullDayCalc get() = translate("Full Day Calculation", "पूरे दिन का कैलकुलेशन")
     val fullDayDesc get() = translate("Shift report sales audit with mobilization, store sales and complete cash desk tally.", "मोबिलाइजेशन, स्टोर बिक्री और पूर्ण कैश डेस्क मिलान के साथ शिफ्ट रिपोर्ट ऑडिट।")
-    
+
+    // CA Module Config Workflow
+    val caConfigTitle get() = translate("CA Module Configuration", "CA मॉड्यूल कॉन्फ़िगरेशन")
+    val stepCaName get() = translate("Step 1: CA Name", "चरण 1: सीए (CA) नाम")
+    val caNameAutoFilled get() = translate("(Auto-filled)", "(स्वचालित रूप से भरा गया)")
+    val stepSelectDate get() = translate("Step 2: Select Date", "चरण 2: तारीख चुनें")
+    val calculationDate get() = translate("Calculation Date", "कैलकुलेशन की तारीख")
+    val stepSelectNozzles get() = translate("Step 3: Select Nozzles", "चरण 3: नोज़ल चुनें")
+    val selectNozzlesDesc get() = translate("Select active nozzles assigned to your account for this shift.", "इस शिफ्ट के लिए अपने खाते में सौंपे गए सक्रिय नोज़ल चुनें।")
+    val noNozzlesFound get() = translate("No nozzles have been configured. Please complete the station setup before starting CA calculations.", "कोई नोज़ल कॉन्फ़िगर नहीं किया गया है। कृपया सीए कैलकुलेशन शुरू करने से पहले स्टेशन सेटअप पूरा करें।")
+    val errorLoadingNozzles get() = translate("Unable to load configured nozzles. Please check your connection or contact the administrator.", "कॉन्फ़िगर किए गए नोज़ल लोड करने में असमर्थ। कृपया अपना कनेक्शन जांचें या व्यवस्थापक से संपर्क करें।")
+    val startCalculation get() = translate("START CALCULATION", "कैलकुलेशन शुरू करें")
+    val selectAll get() = translate("Select All", "सभी चुनें")
+    val clearSelection get() = translate("Clear Selection", "चयन साफ़ करें")
+    val searchNozzles get() = translate("Search nozzles by name, tank or product...", "नाम, टैंक या उत्पाद द्वारा नोज़ल खोजें...")
+
     // Audit Details
     val audit2Config get() = translate("2-Nozzle Audit Config", "2-नोज़ल ऑडिट कॉन्फ़िगरेशन")
     val audit4Config get() = translate("Shift Report & Tally Config", "शिफ्ट रिपोर्ट और मिलान कॉन्फ़िगरेशन")

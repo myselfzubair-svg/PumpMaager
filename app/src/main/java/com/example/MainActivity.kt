@@ -4,16 +4,29 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,25 +42,11 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class Screen {
-  Login,
-  Welcome,
-  ModuleSelection,
-  NozzleSelection,
-  TwoNozzleDetails,
-  TwoNozzleCalculator,
-  FourNozzleDetails,
-  Calculator,
-  FullDayCalculator,
-  History,
-  ManagerDashboard,
-  AdminPanel,
-  DailySalesReport,
-  TtReceiptEntry,
-  TtEntryReport,
-  MonthlyExpensesReport,
-  MonthlyCreditReport,
-  MonthlyUdhariJamaReport,
-  CustomerUdhariLedgerReport
+  Login, Welcome, ModuleSelection, NozzleSelection, TwoNozzleDetails, TwoNozzleCalculator, 
+  FourNozzleDetails, Calculator, FullDayCalculator, History, ManagerDashboard, 
+  DailySalesReport, TtReceiptEntry, TtEntryReport, MonthlyExpensesReport, 
+  MonthlyCreditReport, MonthlyUdhariJamaReport, CustomerUdhariLedgerReport,
+  DailyPumpData, StaffManagement
 }
 
 @Composable
@@ -56,10 +55,15 @@ fun MainNavigationFlow(
   onThemeChange: (Boolean) -> Unit
 ) {
   val context = androidx.compose.ui.platform.LocalContext.current
+  val coroutineScope = rememberCoroutineScope()
+  val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
   val sharedPrefs = remember { context.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE) }
   val savedPumpName = remember { sharedPrefs.getString("session_pump_name", "") ?: "" }
   val savedUsername = remember { sharedPrefs.getString("session_username", "") ?: "" }
   val savedMobile = remember { sharedPrefs.getString("session_mobile", "") ?: "" }
+  val savedAdminPhone = remember { sharedPrefs.getString("session_admin_phone", "") ?: "" }
+  val savedRole = remember { sharedPrefs.getString("session_role", "") ?: "" }
 
   val currentDate = remember {
     java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).format(java.util.Date())
@@ -73,32 +77,29 @@ fun MainNavigationFlow(
   var selectedHsdNozzleCount by remember { mutableStateOf(2) }
   var loggedInUsername by remember { mutableStateOf(savedUsername) }
   var loggedInMobileNumber by remember { mutableStateOf(savedMobile) }
+  var loggedInAdminPhone by remember { mutableStateOf(savedAdminPhone) }
+  var userRole by remember { mutableStateOf(savedRole) }
   var loggedInPumpName by remember { mutableStateOf(if (savedPumpName.isNotEmpty()) savedPumpName else "D R Inamdar Petroleum") }
   var loggedInMsLabels by remember { mutableStateOf(emptyList<String>()) }
   var loggedInHsdLabels by remember { mutableStateOf(emptyList<String>()) }
+  var allRegisteredNozzles by remember { mutableStateOf(emptyList<com.example.database.RegisteredNozzle>()) }
   var activeMsLabels by remember { mutableStateOf(emptyList<String>()) }
   var activeHsdLabels by remember { mutableStateOf(emptyList<String>()) }
-  var isManagersModuleFlow by remember { mutableStateOf(false) }
+  var selectedNozzleList by remember { mutableStateOf(emptyList<com.example.database.RegisteredNozzle>()) }
+  var isManagersModuleFlow by remember { mutableStateOf(savedRole.isNotEmpty() && savedRole.uppercase() != "CA") }
 
-  // Automatically load labels if we have a saved session
-  LaunchedEffect(savedMobile) {
-    if (savedMobile.isNotEmpty()) {
+  LaunchedEffect(loggedInAdminPhone) {
+    if (loggedInAdminPhone.isNotEmpty()) {
       kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val db = com.example.database.AppDatabase.getDatabase(context)
-        val registeredList = db.registeredNozzleDao().getNozzlesByPumpMobile(savedMobile)
+        val registeredList = com.example.database.FirestoreRepository.getRegisteredNozzles(loggedInAdminPhone)
         val finalMsLabels = registeredList.filter { it.nozzleType == "MS" }.sortedBy { it.nozzleIndex }.map { it.label }
         val finalHsdLabels = registeredList.filter { it.nozzleType == "HSD" }.sortedBy { it.nozzleIndex }.map { it.label }
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-          loggedInMsLabels = finalMsLabels
-          loggedInHsdLabels = finalHsdLabels
-          activeMsLabels = finalMsLabels
-          activeHsdLabels = finalHsdLabels
-          if (finalMsLabels.isNotEmpty()) {
-            selectedMsNozzleCount = finalMsLabels.size
-          }
-          if (finalHsdLabels.isNotEmpty()) {
-            selectedHsdNozzleCount = finalHsdLabels.size
-          }
+          allRegisteredNozzles = registeredList
+          loggedInMsLabels = finalMsLabels; loggedInHsdLabels = finalHsdLabels
+          activeMsLabels = finalMsLabels; activeHsdLabels = finalHsdLabels
+          if (finalMsLabels.isNotEmpty()) selectedMsNozzleCount = finalMsLabels.size
+          if (finalHsdLabels.isNotEmpty()) selectedHsdNozzleCount = finalHsdLabels.size
         }
       }
     }
@@ -109,422 +110,410 @@ fun MainNavigationFlow(
 
   val performLogout: () -> Unit = {
     sharedPrefs.edit().apply {
-      remove("session_username")
-      remove("session_pump_name")
-      remove("session_mobile")
-      apply()
+      remove("session_username"); remove("session_pump_name"); remove("session_mobile")
+      remove("session_admin_phone"); remove("session_role"); apply()
     }
     currentScreen = Screen.Login
   }
 
-  var showDateEditDialog by remember { mutableStateOf(false) }
-  var pendingFullDayConfirm by remember { mutableStateOf(false) }
-
-  if (showDateEditDialog) {
-    EditDateDialog(
-      isOpen = true,
-      currentDate = selectedDate,
-      onDismiss = {
-        showDateEditDialog = false
-        pendingFullDayConfirm = false
-      },
-      onConfirm = { newDate ->
-        selectedDate = newDate
-        showDateEditDialog = false
-        if (pendingFullDayConfirm) {
-          pendingFullDayConfirm = false
-          currentScreen = Screen.FullDayCalculator
+  if (currentScreen == Screen.Login) {
+    LoginScreen(
+      onLoginSuccess = { username, pumpName, msLabels, hsdLabels, mobileNumber, adminPhone, role ->
+        loggedInUsername = username; loggedInMobileNumber = mobileNumber
+        loggedInAdminPhone = adminPhone; userRole = role; loggedInPumpName = pumpName
+        loggedInMsLabels = msLabels; loggedInHsdLabels = hsdLabels
+        activeMsLabels = msLabels; activeHsdLabels = hsdLabels
+        if (msLabels.isNotEmpty()) selectedMsNozzleCount = msLabels.size
+        if (hsdLabels.isNotEmpty()) selectedHsdNozzleCount = hsdLabels.size
+        sharedPrefs.edit().apply {
+          putString("session_username", username); putString("session_pump_name", pumpName)
+          putString("session_mobile", mobileNumber); putString("session_admin_phone", adminPhone)
+          putString("session_role", role); apply()
         }
-      }
+        
+        // Role-based Navigation Redirection
+        when(role.uppercase()) {
+            "MANAGER" -> {
+                isManagersModuleFlow = true
+                currentScreen = Screen.ManagerDashboard
+            }
+            "CA" -> {
+                isManagersModuleFlow = false
+                currentScreen = Screen.NozzleSelection
+            }
+            else -> { // ADMIN or default
+                isManagersModuleFlow = true
+                currentScreen = Screen.Welcome
+            }
+        }
+      },
+      onSkipLogin = { loggedInMobileNumber = ""; currentScreen = Screen.Welcome },
+      isDarkTheme = isDarkTheme, onThemeChange = onThemeChange
     )
+    return
   }
 
-  when (currentScreen) {
-    Screen.Login -> {
-      LoginScreen(
-        onLoginSuccess = { username, pumpName, msLabels, hsdLabels, mobileNumber ->
-          loggedInUsername = username
-          loggedInMobileNumber = mobileNumber
-          loggedInPumpName = pumpName
-          loggedInMsLabels = msLabels
-          loggedInHsdLabels = hsdLabels
-          activeMsLabels = msLabels
-          activeHsdLabels = hsdLabels
-          if (msLabels.isNotEmpty()) {
-            selectedMsNozzleCount = msLabels.size
+  ModalNavigationDrawer(
+    drawerState = drawerState,
+    drawerContent = {
+      ModalDrawerSheet(
+        drawerContainerColor = Color.White,
+        drawerContentColor = Color(0xFF0F172A),
+        modifier = Modifier.width(320.dp)
+      ) {
+        Box(
+          modifier = Modifier.fillMaxWidth().height(200.dp)
+            .background(Brush.verticalGradient(listOf(Color(0xFF2563EB), Color(0xFF1E3A8A))))
+            .padding(24.dp)
+        ) {
+          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(color = Color.White.copy(alpha = 0.2f), shape = CircleShape, modifier = Modifier.size(64.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(40.dp)) }
+            }
+            Column {
+              Text(if (loggedInUsername.isEmpty()) "John Smith" else loggedInUsername, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+              Text(if (userRole.isEmpty()) "Administrator" else userRole, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+              Text(if (loggedInMobileNumber.isEmpty()) "+91 98765 43210" else loggedInMobileNumber, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            }
           }
-          if (hsdLabels.isNotEmpty()) {
-            selectedHsdNozzleCount = hsdLabels.size
+          Surface(color = Color(0xFF10B981), shape = CircleShape, modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 12.dp)) {
+              Text("● Online", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
           }
-          
-          // Save session
-          sharedPrefs.edit().apply {
-            putString("session_username", username)
-            putString("session_pump_name", pumpName)
-            putString("session_mobile", mobileNumber)
-            apply()
+        }
+        Spacer(Modifier.height(16.dp))
+        val menuItems = remember(userRole) {
+            val list = mutableListOf(
+              "Home" to Icons.Default.Home
+            )
+            
+            if (userRole == "ADMIN" || userRole == "MANAGER" || userRole.isEmpty()) {
+              list.add("Morning Density" to Icons.Default.Opacity)
+              list.add("Fuel Rates" to Icons.Default.CurrencyRupee)
+              list.add("Opening Stock" to Icons.Default.Storage)
+              list.add("TT Receipt" to Icons.Default.LocalShipping)
+            }
+            
+            list.add("CA Module" to Icons.Default.LocalGasStation)
+            
+            if (userRole == "ADMIN" || userRole == "MANAGER" || userRole.isEmpty()) {
+              list.add("Manager Module" to Icons.Default.Person)
+              list.add("Daily Audit" to Icons.Default.Assessment)
+              list.add("Settings" to Icons.Default.Settings)
+            }
+            
+            list.add("Logout" to Icons.Default.Logout)
+            list
+        }
+
+        Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+          menuItems.forEach { (label, icon) ->
+            NavigationDrawerItem(
+              label = { Text(label, fontWeight = FontWeight.SemiBold) },
+              icon = { Icon(icon, null, modifier = Modifier.size(22.dp)) },
+              selected = false,
+              onClick = {
+                coroutineScope.launch { drawerState.close() }
+                if (label == "Logout") performLogout()
+                else if (label == "Home") currentScreen = Screen.Welcome
+                else if (label == "Manager Module") { isManagersModuleFlow = true; currentScreen = Screen.ManagerDashboard }
+                else if (label == "CA Module") { isManagersModuleFlow = false; currentScreen = Screen.NozzleSelection }
+                else if (label == "Daily Audit") { isManagersModuleFlow = true; currentScreen = Screen.FullDayCalculator }
+                else if (label == "Morning Density" || label == "Fuel Rates" || label == "Opening Stock") { currentScreen = Screen.DailyPumpData }
+                else if (label == "TT Receipt") { isManagersModuleFlow = true; currentScreen = Screen.TtReceiptEntry }
+              },
+              shape = RoundedCornerShape(12.dp),
+              colors = NavigationDrawerItemDefaults.colors(
+                unselectedContainerColor = Color.Transparent, unselectedIconColor = Color(0xFF64748B), unselectedTextColor = Color(0xFF1E293B)
+              )
+            )
           }
-          
-          currentScreen = Screen.Welcome
-        },
-        onSkipLogin = {
-          loggedInMobileNumber = "" // Guest Mode
-          currentScreen = Screen.Welcome
-        },
-        isDarkTheme = isDarkTheme,
-        onThemeChange = onThemeChange
-      )
-    }
-    Screen.Welcome -> {
-      androidx.activity.compose.BackHandler {
-        performLogout()
+        }
       }
+    }
+  ) {
+    Scaffold(
+      bottomBar = {
+        Surface(
+          modifier = Modifier.padding(16.dp).fillMaxWidth().height(72.dp),
+          shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 8.dp
+        ) {
+          Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+            BottomNavItem("Home", Icons.Default.Home, currentScreen == Screen.Welcome) { currentScreen = Screen.Welcome }
+            BottomNavItem("Reports", Icons.Default.Assessment, currentScreen == Screen.ManagerDashboard) { isManagersModuleFlow = true; currentScreen = Screen.ManagerDashboard }
+            BottomNavItem("Profile", Icons.Default.Person, false) {}
+          }
+        }
+      },
+      floatingActionButton = {
+        FloatingActionButton(onClick = {}, containerColor = Color(0xFF2563EB), contentColor = Color.White, shape = CircleShape) { Icon(Icons.Default.Add, null) }
+      }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            MainNavigationContent(
+                currentScreen = currentScreen,
+                onScreenChange = { currentScreen = it },
+                loggedInUsername = loggedInUsername,
+                loggedInPumpName = loggedInPumpName,
+                loggedInMobileNumber = loggedInMobileNumber,
+                loggedInAdminPhone = loggedInAdminPhone,
+                userRole = userRole,
+                activeMsLabels = activeMsLabels,
+                activeHsdLabels = activeHsdLabels,
+                selectedDate = selectedDate,
+                onDateChange = { selectedDate = it },
+                selectedCaName = selectedCaName,
+                onCaNameChange = { selectedCaName = it },
+                selectedMeterNo = selectedMeterNo,
+                onMeterNoChange = { selectedMeterNo = it },
+                selectedNozzleCount = selectedNozzleCount,
+                onNozzleCountChange = { selectedNozzleCount = it },
+                selectedMsNozzleCount = selectedMsNozzleCount,
+                onMsNozzleCountChange = { selectedMsNozzleCount = it },
+                selectedHsdNozzleCount = selectedHsdNozzleCount,
+                onHsdNozzleCountChange = { selectedHsdNozzleCount = it },
+                appLanguage = appLanguage,
+                onLanguageChange = { appLanguage = it },
+                isDarkTheme = isDarkTheme,
+                onThemeChange = onThemeChange,
+                performLogout = performLogout,
+                onDrawerOpen = { coroutineScope.launch { drawerState.open() } },
+                onNavigateToHistory = { currentScreen = Screen.History },
+                onNavigateToReports = { isManagersModuleFlow = true; currentScreen = Screen.ManagerDashboard },
+                onNavigateToDailySalesReport = { isManagersModuleFlow = true; currentScreen = Screen.DailySalesReport },
+                onNavigateToAllModules = { currentScreen = Screen.ModuleSelection },
+                onNavigateToDailyPumpData = { currentScreen = Screen.DailyPumpData },
+                isManagersModuleFlow = isManagersModuleFlow,
+                onManagersModuleFlowChange = { isManagersModuleFlow = it },
+                onActiveMsLabelsChange = { activeMsLabels = it },
+                onActiveHsdLabelsChange = { activeHsdLabels = it },
+                selectedNozzleList = selectedNozzleList,
+                onNozzleListChange = { selectedNozzleList = it }
+            )
+        }
+    }
+  }
+}
+
+@Composable
+fun BottomNavItem(label: String, icon: ImageVector, isSelected: Boolean, onClick: () -> Unit) {
+    Column(
+      modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onClick() }.padding(8.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center
+    ) {
+        Icon(icon, null, tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF94A3B8), modifier = Modifier.size(24.dp))
+        Text(label, fontSize = 10.sp, color = if (isSelected) Color(0xFF2563EB) else Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun MainNavigationContent(
+  currentScreen: Screen,
+  onScreenChange: (Screen) -> Unit,
+  loggedInUsername: String,
+  loggedInPumpName: String,
+  loggedInMobileNumber: String,
+  loggedInAdminPhone: String,
+  userRole: String,
+  activeMsLabels: List<String>,
+  onActiveMsLabelsChange: (List<String>) -> Unit,
+  activeHsdLabels: List<String>,
+  onActiveHsdLabelsChange: (List<String>) -> Unit,
+  selectedDate: String,
+  onDateChange: (String) -> Unit,
+  selectedCaName: String,
+  onCaNameChange: (String) -> Unit,
+  selectedMeterNo: String,
+  onMeterNoChange: (String) -> Unit,
+  selectedNozzleCount: Int,
+  onNozzleCountChange: (Int) -> Unit,
+  selectedMsNozzleCount: Int,
+  onMsNozzleCountChange: (Int) -> Unit,
+  selectedHsdNozzleCount: Int,
+  onHsdNozzleCountChange: (Int) -> Unit,
+  appLanguage: AppLanguage,
+  onLanguageChange: (AppLanguage) -> Unit,
+  isDarkTheme: Boolean,
+  onThemeChange: (Boolean) -> Unit,
+  performLogout: () -> Unit,
+  onDrawerOpen: () -> Unit,
+  onNavigateToHistory: () -> Unit,
+  onNavigateToReports: () -> Unit,
+  onNavigateToDailySalesReport: () -> Unit,
+  onNavigateToAllModules: () -> Unit,
+  onNavigateToDailyPumpData: () -> Unit,
+  isManagersModuleFlow: Boolean,
+  onManagersModuleFlowChange: (Boolean) -> Unit,
+  selectedNozzleList: List<com.example.database.RegisteredNozzle>,
+  onNozzleListChange: (List<com.example.database.RegisteredNozzle>) -> Unit
+) {
+  when (currentScreen) {
+    Screen.Welcome -> {
       WelcomeScreen(
-        onNavigateToCalculator = { currentScreen = Screen.ModuleSelection },
+        onNavigateToCalculator = { 
+            onManagersModuleFlowChange(false)
+            onScreenChange(Screen.NozzleSelection) 
+        },
         language = appLanguage,
-        onLanguageChange = { appLanguage = it },
+        onLanguageChange = onLanguageChange,
         isDarkTheme = isDarkTheme,
         onThemeChange = onThemeChange,
         pumpName = loggedInPumpName,
         loggedInMobileNumber = loggedInMobileNumber,
-        onLogout = performLogout
+        adminPhone = loggedInAdminPhone,
+        userRoleFromSession = userRole,
+        onLogout = performLogout,
+        onDrawerOpen = onDrawerOpen,
+        onNavigateToHistory = onNavigateToHistory,
+        onNavigateToReports = onNavigateToReports,
+        onNavigateToDailySalesReport = onNavigateToDailySalesReport,
+        onNavigateToAllModules = onNavigateToAllModules,
+        onNavigateToDailyPumpData = onNavigateToDailyPumpData,
+        onNavigateToStaffManagement = { onScreenChange(Screen.StaffManagement) }
       )
     }
     Screen.ModuleSelection -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.Welcome
-      }
       ModuleSelectionScreen(
         loggedInMobileNumber = loggedInMobileNumber,
-        onNavigateToCaModule = {
-          isManagersModuleFlow = false
-          currentScreen = Screen.NozzleSelection
-        },
-        onNavigateToManagersModule = {
-          isManagersModuleFlow = true
-          currentScreen = Screen.ManagerDashboard
-        },
-        onNavigateToAdminPanel = { currentScreen = Screen.AdminPanel },
-        onNavigateToHistory = { currentScreen = Screen.History },
-        onBack = { currentScreen = Screen.Welcome },
+        adminPhone = loggedInAdminPhone,
+        pumpName = loggedInPumpName,
+        userRoleFromSession = userRole,
+        onNavigateToCaModule = { onScreenChange(Screen.NozzleSelection) },
+        onNavigateToManagersModule = { onScreenChange(Screen.ManagerDashboard) },
+        onNavigateToHistory = { onScreenChange(Screen.History) },
+        onBack = { onScreenChange(Screen.Welcome) },
         onLogout = performLogout
       )
     }
     Screen.NozzleSelection -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ModuleSelection
-      }
-      NozzleSelectionScreen(
-        initialMsCount = selectedMsNozzleCount,
-        initialHsdCount = selectedHsdNozzleCount,
-        username = loggedInUsername,
-        isCaModule = !isManagersModuleFlow,
-        msNozzleLabels = loggedInMsLabels,
-        hsdNozzleLabels = loggedInHsdLabels,
-        onNavigateToCalculator = { msCount, hsdCount, msLabels, hsdLabels ->
-          selectedMsNozzleCount = msCount
-          selectedHsdNozzleCount = hsdCount
-          activeMsLabels = msLabels
-          activeHsdLabels = hsdLabels
-          if (isManagersModuleFlow) {
-            currentScreen = Screen.FullDayCalculator
-          } else {
-            currentScreen = Screen.FourNozzleDetails
-          }
-        },
-        onNavigateToFullDay = { 
-          selectedMsNozzleCount = 2
-          selectedHsdNozzleCount = 2
-          activeMsLabels = emptyList()
-          activeHsdLabels = emptyList()
-          currentScreen = Screen.FullDayCalculator
-        },
-        onBack = { currentScreen = Screen.ModuleSelection },
-        onLogout = performLogout
-      )
-    }
-    Screen.TwoNozzleDetails -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.NozzleSelection
-      }
-      AuditDetailsScreen(
-        isFourNozzle = false,
-        selectedDate = selectedDate,
-        onBack = { currentScreen = Screen.NozzleSelection },
-        onProceed = { date, caName, meterNo ->
-          selectedDate = date
-          selectedCaName = caName
-          selectedMeterNo = meterNo
-          currentScreen = Screen.TwoNozzleCalculator
-        },
-        onLogout = performLogout
-      )
-    }
-    Screen.TwoNozzleCalculator -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.TwoNozzleDetails
-      }
-      TwoNozzleCalculatorScreen(
-        onBack = { currentScreen = Screen.TwoNozzleDetails },
-        onSaveSuccess = { currentScreen = Screen.ModuleSelection },
-        date = selectedDate,
-        caName = selectedCaName,
-        meterNo = selectedMeterNo,
-        nozzleCount = selectedNozzleCount,
-        phone = loggedInUsername,
-        onLogout = performLogout
-      )
+        NozzleSelectionScreen(
+            initialMsCount = selectedMsNozzleCount,
+            initialHsdCount = selectedHsdNozzleCount,
+            username = loggedInUsername,
+            adminPhone = loggedInAdminPhone,
+            isCaModule = !isManagersModuleFlow,
+            onNavigateToCalculator = { nozzles, date, caName ->
+                onNozzleListChange(nozzles)
+                onDateChange(date)
+                onCaNameChange(caName)
+                
+                if (isManagersModuleFlow) {
+                    onScreenChange(Screen.FullDayCalculator)
+                } else {
+                    onScreenChange(Screen.Calculator)
+                }
+            },
+            onNavigateToFullDay = { 
+                onScreenChange(Screen.FullDayCalculator)
+            },
+            onBack = { onScreenChange(Screen.Welcome) },
+            onLogout = performLogout
+        )
     }
     Screen.FourNozzleDetails -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.NozzleSelection
-      }
-      AuditDetailsScreen(
-        isFourNozzle = true,
-        selectedDate = selectedDate,
-        onBack = { currentScreen = Screen.NozzleSelection },
-        onProceed = { date, caName, meterNo ->
-          selectedDate = date
-          selectedCaName = caName
-          selectedMeterNo = meterNo
-          currentScreen = Screen.Calculator
-        },
-        onLogout = performLogout
-      )
+        AuditDetailsScreen(
+            isFourNozzle = true,
+            selectedDate = selectedDate,
+            adminPhone = loggedInAdminPhone,
+            onBack = { onScreenChange(Screen.NozzleSelection) },
+            onProceed = { date, caName, meterNo ->
+                onDateChange(date)
+                onCaNameChange(caName)
+                onMeterNoChange(meterNo)
+                onScreenChange(Screen.Calculator)
+            },
+            onLogout = performLogout
+        )
     }
     Screen.Calculator -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.FourNozzleDetails
-      }
-      CalculatorScreen(
-        onBack = { currentScreen = Screen.FourNozzleDetails },
-        onSaveSuccess = { currentScreen = Screen.ModuleSelection },
-        date = selectedDate,
-        caName = selectedCaName,
-        meterNo = selectedMeterNo,
-        msNozzleCount = selectedMsNozzleCount,
-        hsdNozzleCount = selectedHsdNozzleCount,
-        msNozzleLabels = activeMsLabels,
-        hsdNozzleLabels = activeHsdLabels,
-        phone = loggedInUsername,
-        onLogout = performLogout
-      )
+        CalculatorScreen(
+            onBack = { onScreenChange(Screen.FourNozzleDetails) },
+            onSaveSuccess = { onScreenChange(Screen.Welcome) },
+            date = selectedDate,
+            caName = selectedCaName,
+            meterNo = selectedMeterNo,
+            selectedNozzles = selectedNozzleList,
+            phone = loggedInUsername,
+            adminPhone = loggedInAdminPhone,
+            onLogout = performLogout
+        )
     }
     Screen.FullDayCalculator -> {
-      androidx.activity.compose.BackHandler {
-        if (isManagersModuleFlow) {
-          currentScreen = Screen.ManagerDashboard
-        } else {
-          currentScreen = Screen.ModuleSelection
-        }
-      }
-      FullDayCalculatorScreen(
-        onBack = {
-          if (isManagersModuleFlow) {
-            currentScreen = Screen.ManagerDashboard
-          } else {
-            currentScreen = Screen.ModuleSelection
-          }
-        },
-        date = selectedDate,
-        onDateClick = { showDateEditDialog = true },
-        msNozzleCount = selectedMsNozzleCount,
-        hsdNozzleCount = selectedHsdNozzleCount,
-        msNozzleLabels = activeMsLabels,
-        hsdNozzleLabels = activeHsdLabels,
-        phone = loggedInUsername,
-        onLogout = performLogout
-      )
+        FullDayCalculatorScreen(
+            onBack = { onScreenChange(Screen.Welcome) },
+            date = selectedDate,
+            adminPhone = loggedInAdminPhone,
+            phone = loggedInUsername,
+            onLogout = performLogout
+        )
     }
     Screen.ManagerDashboard -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ModuleSelection
-      }
       ManagerDashboardScreen(
-        onBack = { currentScreen = Screen.ModuleSelection },
+        adminPhone = loggedInAdminPhone,
+        onBack = { onScreenChange(Screen.Welcome) },
         onNavigateToDailyAudit = { dateStr ->
-          selectedDate = dateStr
-          currentScreen = Screen.FullDayCalculator
+            onDateChange(dateStr)
+            onScreenChange(Screen.FullDayCalculator)
         },
-        onNavigateToDailySalesReport = {
-          currentScreen = Screen.DailySalesReport
-        },
-        onNavigateToTtReceiptEntry = {
-          currentScreen = Screen.TtReceiptEntry
-        },
-        onNavigateToTtEntryReport = {
-          currentScreen = Screen.TtEntryReport
-        },
-        onNavigateToMonthlyExpensesReport = {
-          currentScreen = Screen.MonthlyExpensesReport
-        },
-        onNavigateToMonthlyCreditReport = {
-          currentScreen = Screen.MonthlyCreditReport
-        },
-        onNavigateToMonthlyUdhariJamaReport = {
-          currentScreen = Screen.MonthlyUdhariJamaReport
-        },
-        onNavigateToCustomerUdhariLedgerReport = {
-          currentScreen = Screen.CustomerUdhariLedgerReport
-        },
-        onLogout = performLogout
-      )
-    }
-    Screen.CustomerUdhariLedgerReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      CustomerUdhariLedgerReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.MonthlyCreditReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      MonthlyCreditReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.MonthlyUdhariJamaReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      MonthlyUdhariJamaReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.MonthlyExpensesReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      MonthlyExpensesReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.TtReceiptEntry -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      TtReceiptEntryScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.TtEntryReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      TtEntryReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
-        onLogout = performLogout
-      )
-    }
-    Screen.DailySalesReport -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ManagerDashboard
-      }
-      DailySalesReportScreen(
-        onBack = { currentScreen = Screen.ManagerDashboard },
+        onNavigateToDailySalesReport = { onScreenChange(Screen.DailySalesReport) },
+        onNavigateToTtEntryReport = { onScreenChange(Screen.TtEntryReport) },
+        onNavigateToMonthlyExpensesReport = { onScreenChange(Screen.MonthlyExpensesReport) },
+        onNavigateToMonthlyCreditReport = { onScreenChange(Screen.MonthlyCreditReport) },
+        onNavigateToMonthlyUdhariJamaReport = { onScreenChange(Screen.MonthlyUdhariJamaReport) },
+        onNavigateToCustomerUdhariLedgerReport = { onScreenChange(Screen.CustomerUdhariLedgerReport) },
         onLogout = performLogout
       )
     }
     Screen.History -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ModuleSelection
-      }
-      HistoryScreen(
-        onBack = { currentScreen = Screen.ModuleSelection },
-        onLogout = performLogout
-      )
+      HistoryScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.Welcome) }, onLogout = performLogout)
     }
-    Screen.AdminPanel -> {
-      androidx.activity.compose.BackHandler {
-        currentScreen = Screen.ModuleSelection
-      }
-      AdminPanelScreen(
-        onBack = { currentScreen = Screen.ModuleSelection },
-        onLogout = performLogout
-      )
+    Screen.DailySalesReport -> {
+        DailySalesReportScreen(onBack = { onScreenChange(Screen.ManagerDashboard) }, adminPhone = loggedInAdminPhone, onLogout = performLogout)
     }
+    Screen.TtReceiptEntry -> {
+        TtReceiptEntryScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.TtEntryReport -> {
+        TtEntryReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.MonthlyExpensesReport -> {
+        MonthlyExpensesReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.MonthlyCreditReport -> {
+        MonthlyCreditReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.MonthlyUdhariJamaReport -> {
+        MonthlyUdhariJamaReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.CustomerUdhariLedgerReport -> {
+        CustomerUdhariLedgerReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.DailyPumpData -> {
+        DailyPumpDataScreen(adminPhone = loggedInAdminPhone, enteredBy = loggedInUsername, onBack = { onScreenChange(Screen.Welcome) })
+    }
+    Screen.StaffManagement -> {
+        StaffManagementScreen(adminPhone = loggedInAdminPhone, pumpName = loggedInPumpName, onBack = { onScreenChange(Screen.Welcome) })
+    }
+    else -> { /* Handle others if needed */ }
   }
 }
 
 @Composable
-fun EditDateDialog(
-    isOpen: Boolean,
-    currentDate: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
+fun EditDateDialog(isOpen: Boolean, currentDate: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     if (!isOpen) return
-
     var textState by remember { mutableStateOf(currentDate) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Set Session Date",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
+        title = { Text(text = "Set Session Date", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Please verify or modify the active shift and reconciliation date.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = textState,
-                    onValueChange = { textState = it },
-                    label = { Text("Date (dd-mm-yyyy)") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("dialog_date_input")
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Text(text = "Please verify or modify the active shift and reconciliation date.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = textState, onValueChange = { textState = it }, label = { Text("Date (dd-mm-yyyy)") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("dialog_date_input"))
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onConfirm(textState.trim())
-                },
-                modifier = Modifier.testTag("dialog_date_confirm_button")
-            ) {
-                Text("Confirm")
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.testTag("dialog_date_cancel_button")
-            ) {
-                Text("Cancel")
-            }
-        },
+        confirmButton = { Button(onClick = { onConfirm(textState.trim()) }, modifier = Modifier.testTag("dialog_date_confirm_button")) { Text("Confirm") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("dialog_date_cancel_button")) { Text("Cancel") } },
         shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-  Text(text = "Hello $name!", modifier = modifier)
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-  MyApplicationTheme {
-    CalculatorScreen()
-  }
 }

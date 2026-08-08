@@ -276,7 +276,7 @@ object PdfGenerator {
                 if (line.contains("|")) {
                     val parts = line.split("|")
                     var currentX = margin + 8f
-                    val availableSpace = (pageWidth - 2 * margin - 16f) / parts.size
+                    val availableSpace = (pageWidth - 2 * margin - 16f) / (if (parts.isNotEmpty()) parts.size else 1)
                     for (part in parts) {
                         val subParts = part.trim().split(":")
                         if (subParts.size >= 2) {

@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "tt_receipt_entries")
 data class TtReceiptEntry(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val ownerAdminPhone: String, // Multi-tenancy isolation
     val date: String,
     val invoiceNumber: String,
     val ttNumber: String,
