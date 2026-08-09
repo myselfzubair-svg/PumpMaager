@@ -1,32 +1,13 @@
 {
   "project_info": {
-    "project_number": "985120822522",
-    "project_id": "my-fuel-audit",
-    "storage_bucket": "my-fuel-audit.firebasestorage.app"
+    "project_number": "985467327177",
+    "project_id": "calc-164720",
+    "storage_bucket": "calc-164720.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:985120822522:android:5bdf16e348a83c21e2e543",
-        "android_client_info": {
-          "package_name": "com.drinamdarp.ManagePumpCalc"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyCp6oNE7xhiGW81hDZMvgWB-EEZPIHCffE"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:985120822522:android:83acfd4c25583c99e2e543",
+        "mobilesdk_app_id": "1:985467327177:android:4ce8e11d1426368fbc7318",
         "android_client_info": {
           "package_name": "com.mypump.cal"
         }
@@ -34,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCp6oNE7xhiGW81hDZMvgWB-EEZPIHCffE"
+          "current_key": "AIzaSyBDhY3RBDRPtZIahEkPptj3eA_CNjqKVN4"
         }
       ],
       "services": {

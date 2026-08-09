@@ -20,14 +20,15 @@ class MyApplication : Application() {
                 firebaseAppCheck.installAppCheckProviderFactory(
                     DebugAppCheckProviderFactory.getInstance()
                 )
-                Log.i("MyApplication", "Firebase App Check successfully initialized with Debug Provider.")
+                Log.i("MyApplication", "Firebase App Check: Debug Provider installed.")
+                val debugToken = getAppCheckDebugToken(this)
+                Log.d("MyApplication", "App Check Debug Token available: ${debugToken != null}")
             } else {
                 // Initialize with Play Integrity
                 firebaseAppCheck.installAppCheckProviderFactory(
                     PlayIntegrityAppCheckProviderFactory.getInstance()
                 )
-                
-                Log.i("MyApplication", "Firebase App Check successfully initialized with Play Integrity Provider.")
+                Log.i("MyApplication", "Firebase App Check: Play Integrity Provider installed.")
             }
         } catch (e: Exception) {
             Log.e("MyApplication", "Failed to initialize Firebase / App Check", e)

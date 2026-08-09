@@ -38,8 +38,10 @@ object FirebasePhoneAuthManager {
 
             override fun onVerificationFailed(e: FirebaseException) {
                 Log.e(TAG, "onVerificationFailed: code=${e.message}", e)
-                Log.e(TAG, "Check if SHA-1/SHA-256 fingerprints are added to Firebase Console.")
-                Log.e(TAG, "Check if Phone Auth is enabled in Firebase Console.")
+                if (e.message?.contains("app check", ignoreCase = true) == true) {
+                    Log.e(TAG, "App Check verification failed. This usually triggers reCAPTCHA fallback.")
+                }
+                Log.e(TAG, "Verify that SHA-256 fingerprint is added to Firebase Console and Play Integrity API is enabled in Google Cloud Console.")
                 callbacks.onVerificationFailed(e)
             }
 
