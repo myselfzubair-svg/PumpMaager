@@ -6,7 +6,8 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
+  // alias(libs.plugins.google.services)
+  alias(libs.plugins.kotlin.serialization)
   id("kotlin-parcelize")
 }
 
@@ -18,8 +19,8 @@ android {
     applicationId = "com.mypump.cal"
     minSdk = 24
     targetSdk = 36
-    versionCode = 7
-    versionName = "1.0.6"
+    versionCode = 11
+    versionName = "11.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -71,17 +72,20 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
-  implementation(libs.firebase.auth)
-  implementation(libs.firebase.firestore)
-  implementation(libs.firebase.appcheck.playintegrity)
-  implementation(libs.firebase.appcheck.debug)
+  // Firebase (Removed for Supabase Migration)
+  // implementation(platform(libs.firebase.bom))
+  // implementation(libs.firebase.auth)
+  // implementation(libs.firebase.firestore)
+  // implementation(libs.firebase.appcheck)
+  // implementation(libs.firebase.appcheck.playintegrity)
+  // implementation(libs.firebase.appcheck.debug)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
   // implementation(libs.androidx.camera.core)
   // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
+  // implementation(libs.androidx.camera.view)run this
+
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -106,6 +110,20 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  
+  // Supabase
+  implementation(platform(libs.supabase.bom))
+  implementation(libs.supabase.postgrest)
+  implementation(libs.supabase.auth)
+  implementation(libs.supabase.realtime)
+  implementation(libs.supabase.storage)
+  
+  // Ktor (Required for Supabase)
+  implementation(libs.ktor.client.core)
+  implementation(libs.ktor.client.okhttp)
+  implementation(libs.ktor.client.content.negotiation)
+  implementation(libs.ktor.serialization.kotlinx.json)
+
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

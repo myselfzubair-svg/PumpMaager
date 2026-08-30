@@ -97,48 +97,45 @@ fun CustomerUdhariLedgerReportScreen(
         }
     }
 
-    // Load audits from Cloud
-    val allAuditsState = com.example.database.FirestoreRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    // Load data from Cloud
+    val allCreditsState = com.example.database.SupabaseRepository.getCreditEntriesFlow(adminPhone).collectAsState(initial = emptyList())
+    val allRecoveriesState = com.example.database.SupabaseRepository.getRecoveryEntriesFlow(adminPhone).collectAsState(initial = emptyList())
 
-    // Parse all transactions from audits
-    val parsedTransactions = remember(allAuditsState.value) {
+    // Parse all transactions from DB entries
+    val parsedTransactions = remember(allCreditsState.value, allRecoveriesState.value) {
         val list = mutableListOf<Pair<String, CustomerTransaction>>() // Name to Transaction
 
-        allAuditsState.value.forEach { audit ->
-            // 1. Parse Credits Given (Udhar)
-            val givenList = parseDetailedCredits(audit.summaryText)
-            givenList.forEach { (desc, amt) ->
-                val cleanedName = desc.trim()
-                if (cleanedName.isNotEmpty()) {
-                    list.add(
-                        cleanedName to CustomerTransaction(
-                            date = audit.date,
-                            type = TransactionType.GIVEN,
-                            amount = amt,
-                            caName = audit.caName,
-                            auditId = audit.id,
-                            timestamp = audit.timestamp
-                        )
+        // 1. Credits Given (Udhar)
+        allCreditsState.value.forEach { entry ->
+            val cleanedName = entry.party.trim()
+            if (cleanedName.isNotEmpty()) {
+                list.add(
+                    cleanedName to CustomerTransaction(
+                        date = entry.date,
+                        type = TransactionType.GIVEN,
+                        amount = entry.amount,
+                        caName = entry.caName,
+                        auditId = entry.id?.toInt() ?: 0,
+                        timestamp = entry.timestamp
                     )
-                }
+                )
             }
+        }
 
-            // 2. Parse Credits Recovered (Udhari Jama)
-            val recoveredList = parseDetailedRecoveries(audit.summaryText)
-            recoveredList.forEach { (desc, amt) ->
-                val cleanedName = desc.trim()
-                if (cleanedName.isNotEmpty()) {
-                    list.add(
-                        cleanedName to CustomerTransaction(
-                            date = audit.date,
-                            type = TransactionType.RECOVERED,
-                            amount = amt,
-                            caName = audit.caName,
-                            auditId = audit.id,
-                            timestamp = audit.timestamp
-                        )
+        // 2. Credits Recovered (Udhari Jama)
+        allRecoveriesState.value.forEach { entry ->
+            val cleanedName = entry.party.trim()
+            if (cleanedName.isNotEmpty()) {
+                list.add(
+                    cleanedName to CustomerTransaction(
+                        date = entry.date,
+                        type = TransactionType.RECOVERED,
+                        amount = entry.amount,
+                        caName = entry.caName,
+                        auditId = entry.id?.toInt() ?: 0,
+                        timestamp = entry.timestamp
                     )
-                }
+                )
             }
         }
         list

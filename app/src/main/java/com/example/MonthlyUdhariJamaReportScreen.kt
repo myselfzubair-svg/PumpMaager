@@ -88,7 +88,7 @@ fun MonthlyUdhariJamaReportScreen(
     }
 
     // Load audits from Cloud
-    val allAuditsState = com.example.database.FirestoreRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -122,7 +122,7 @@ fun MonthlyUdhariJamaReportScreen(
                             description = desc,
                             amount = amt,
                             caName = audit.caName,
-                            auditId = audit.id
+                            auditId = audit.id ?: 0
                         )
                     )
                 }

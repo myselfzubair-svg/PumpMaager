@@ -42,8 +42,8 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class Screen {
-  Login, Welcome, ModuleSelection, NozzleSelection, TwoNozzleDetails, TwoNozzleCalculator, 
-  FourNozzleDetails, Calculator, FullDayCalculator, History, ManagerDashboard, 
+  Login, Welcome, ModuleSelection, NozzleSelection, 
+  Calculator, FullDayCalculator, History, ManagerDashboard, 
   DailySalesReport, TtReceiptEntry, TtEntryReport, MonthlyExpensesReport, 
   MonthlyCreditReport, MonthlyUdhariJamaReport, CustomerUdhariLedgerReport,
   DailyPumpData, StaffManagement
@@ -63,6 +63,7 @@ fun MainNavigationFlow(
   val savedUsername = remember { sharedPrefs.getString("session_username", "") ?: "" }
   val savedMobile = remember { sharedPrefs.getString("session_mobile", "") ?: "" }
   val savedAdminPhone = remember { sharedPrefs.getString("session_admin_phone", "") ?: "" }
+  val savedAccountId = remember { sharedPrefs.getString("session_account_id", "") ?: "" }
   val savedRole = remember { sharedPrefs.getString("session_role", "") ?: "" }
 
   val currentDate = remember {
@@ -71,36 +72,27 @@ fun MainNavigationFlow(
   var currentScreen by remember { mutableStateOf(if (savedPumpName.isNotEmpty()) Screen.Welcome else Screen.Login) }
   var selectedDate by remember { mutableStateOf(currentDate) }
   var selectedCaName by remember { mutableStateOf("") }
-  var selectedMeterNo by remember { mutableStateOf("") }
-  var selectedNozzleCount by remember { mutableStateOf(4) }
-  var selectedMsNozzleCount by remember { mutableStateOf(2) }
-  var selectedHsdNozzleCount by remember { mutableStateOf(2) }
   var loggedInUsername by remember { mutableStateOf(savedUsername) }
   var loggedInMobileNumber by remember { mutableStateOf(savedMobile) }
   var loggedInAdminPhone by remember { mutableStateOf(savedAdminPhone) }
+  var loggedInAccountId by remember { mutableStateOf(savedAccountId) }
   var userRole by remember { mutableStateOf(savedRole) }
   var loggedInPumpName by remember { mutableStateOf(if (savedPumpName.isNotEmpty()) savedPumpName else "D R Inamdar Petroleum") }
-  var loggedInMsLabels by remember { mutableStateOf(emptyList<String>()) }
-  var loggedInHsdLabels by remember { mutableStateOf(emptyList<String>()) }
   var allRegisteredNozzles by remember { mutableStateOf(emptyList<com.example.database.RegisteredNozzle>()) }
-  var activeMsLabels by remember { mutableStateOf(emptyList<String>()) }
-  var activeHsdLabels by remember { mutableStateOf(emptyList<String>()) }
   var selectedNozzleList by remember { mutableStateOf(emptyList<com.example.database.RegisteredNozzle>()) }
   var isManagersModuleFlow by remember { mutableStateOf(savedRole.isNotEmpty() && savedRole.uppercase() != "CA") }
 
   LaunchedEffect(loggedInAdminPhone) {
     if (loggedInAdminPhone.isNotEmpty()) {
-      kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val registeredList = com.example.database.FirestoreRepository.getRegisteredNozzles(loggedInAdminPhone)
-        val finalMsLabels = registeredList.filter { it.nozzleType == "MS" }.sortedBy { it.nozzleIndex }.map { it.label }
-        val finalHsdLabels = registeredList.filter { it.nozzleType == "HSD" }.sortedBy { it.nozzleIndex }.map { it.label }
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-          allRegisteredNozzles = registeredList
-          loggedInMsLabels = finalMsLabels; loggedInHsdLabels = finalHsdLabels
-          activeMsLabels = finalMsLabels; activeHsdLabels = finalHsdLabels
-          if (finalMsLabels.isNotEmpty()) selectedMsNozzleCount = finalMsLabels.size
-          if (finalHsdLabels.isNotEmpty()) selectedHsdNozzleCount = finalHsdLabels.size
+      try {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+          val registeredList = com.example.database.SupabaseRepository.getRegisteredNozzles(loggedInAdminPhone)
+          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            allRegisteredNozzles = registeredList
+          }
         }
+      } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Error in nozzle prefetch: ${e.message}")
       }
     }
   }
@@ -111,41 +103,26 @@ fun MainNavigationFlow(
   val performLogout: () -> Unit = {
     sharedPrefs.edit().apply {
       remove("session_username"); remove("session_pump_name"); remove("session_mobile")
-      remove("session_admin_phone"); remove("session_role"); apply()
+      remove("session_admin_phone"); remove("session_account_id"); remove("session_role"); apply()
     }
     currentScreen = Screen.Login
   }
 
   if (currentScreen == Screen.Login) {
     LoginScreen(
-      onLoginSuccess = { username, pumpName, msLabels, hsdLabels, mobileNumber, adminPhone, role ->
+      onLoginSuccess = { username, pumpName, msLabels, hsdLabels, mobileNumber, adminPhone, role, accountId ->
         loggedInUsername = username; loggedInMobileNumber = mobileNumber
         loggedInAdminPhone = adminPhone; userRole = role; loggedInPumpName = pumpName
-        loggedInMsLabels = msLabels; loggedInHsdLabels = hsdLabels
-        activeMsLabels = msLabels; activeHsdLabels = hsdLabels
-        if (msLabels.isNotEmpty()) selectedMsNozzleCount = msLabels.size
-        if (hsdLabels.isNotEmpty()) selectedHsdNozzleCount = hsdLabels.size
+        loggedInAccountId = accountId
         sharedPrefs.edit().apply {
           putString("session_username", username); putString("session_pump_name", pumpName)
           putString("session_mobile", mobileNumber); putString("session_admin_phone", adminPhone)
-          putString("session_role", role); apply()
+          putString("session_account_id", accountId); putString("session_role", role); apply()
         }
         
-        // Role-based Navigation Redirection
-        when(role.uppercase()) {
-            "MANAGER" -> {
-                isManagersModuleFlow = true
-                currentScreen = Screen.ManagerDashboard
-            }
-            "CA" -> {
-                isManagersModuleFlow = false
-                currentScreen = Screen.NozzleSelection
-            }
-            else -> { // ADMIN or default
-                isManagersModuleFlow = true
-                currentScreen = Screen.Welcome
-            }
-        }
+        // Always land on Home (Welcome) screen after login as requested
+        isManagersModuleFlow = role.uppercase() != "CA"
+        currentScreen = Screen.Welcome
       },
       onSkipLogin = { loggedInMobileNumber = ""; currentScreen = Screen.Welcome },
       isDarkTheme = isDarkTheme, onThemeChange = onThemeChange
@@ -171,9 +148,11 @@ fun MainNavigationFlow(
                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(40.dp)) }
             }
             Column {
-              Text(if (loggedInUsername.isEmpty()) "John Smith" else loggedInUsername, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-              Text(if (userRole.isEmpty()) "Administrator" else userRole, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-              Text(if (loggedInMobileNumber.isEmpty()) "+91 98765 43210" else loggedInMobileNumber, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+              Text("Welcome to", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+              Text(loggedInPumpName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
+              Spacer(Modifier.height(4.dp))
+              Text("Active User: $loggedInUsername", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+              Text(if (userRole.isEmpty()) "Administrator" else userRole, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
             }
           }
           Surface(color = Color(0xFF10B981), shape = CircleShape, modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 12.dp)) {
@@ -243,9 +222,6 @@ fun MainNavigationFlow(
             BottomNavItem("Profile", Icons.Default.Person, false) {}
           }
         }
-      },
-      floatingActionButton = {
-        FloatingActionButton(onClick = {}, containerColor = Color(0xFF2563EB), contentColor = Color.White, shape = CircleShape) { Icon(Icons.Default.Add, null) }
       }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
@@ -256,21 +232,12 @@ fun MainNavigationFlow(
                 loggedInPumpName = loggedInPumpName,
                 loggedInMobileNumber = loggedInMobileNumber,
                 loggedInAdminPhone = loggedInAdminPhone,
+                loggedInAccountId = loggedInAccountId,
                 userRole = userRole,
-                activeMsLabels = activeMsLabels,
-                activeHsdLabels = activeHsdLabels,
                 selectedDate = selectedDate,
                 onDateChange = { selectedDate = it },
                 selectedCaName = selectedCaName,
                 onCaNameChange = { selectedCaName = it },
-                selectedMeterNo = selectedMeterNo,
-                onMeterNoChange = { selectedMeterNo = it },
-                selectedNozzleCount = selectedNozzleCount,
-                onNozzleCountChange = { selectedNozzleCount = it },
-                selectedMsNozzleCount = selectedMsNozzleCount,
-                onMsNozzleCountChange = { selectedMsNozzleCount = it },
-                selectedHsdNozzleCount = selectedHsdNozzleCount,
-                onHsdNozzleCountChange = { selectedHsdNozzleCount = it },
                 appLanguage = appLanguage,
                 onLanguageChange = { appLanguage = it },
                 isDarkTheme = isDarkTheme,
@@ -284,8 +251,6 @@ fun MainNavigationFlow(
                 onNavigateToDailyPumpData = { currentScreen = Screen.DailyPumpData },
                 isManagersModuleFlow = isManagersModuleFlow,
                 onManagersModuleFlowChange = { isManagersModuleFlow = it },
-                onActiveMsLabelsChange = { activeMsLabels = it },
-                onActiveHsdLabelsChange = { activeHsdLabels = it },
                 selectedNozzleList = selectedNozzleList,
                 onNozzleListChange = { selectedNozzleList = it }
             )
@@ -314,23 +279,12 @@ fun MainNavigationContent(
   loggedInPumpName: String,
   loggedInMobileNumber: String,
   loggedInAdminPhone: String,
+  loggedInAccountId: String,
   userRole: String,
-  activeMsLabels: List<String>,
-  onActiveMsLabelsChange: (List<String>) -> Unit,
-  activeHsdLabels: List<String>,
-  onActiveHsdLabelsChange: (List<String>) -> Unit,
   selectedDate: String,
   onDateChange: (String) -> Unit,
   selectedCaName: String,
   onCaNameChange: (String) -> Unit,
-  selectedMeterNo: String,
-  onMeterNoChange: (String) -> Unit,
-  selectedNozzleCount: Int,
-  onNozzleCountChange: (Int) -> Unit,
-  selectedMsNozzleCount: Int,
-  onMsNozzleCountChange: (Int) -> Unit,
-  selectedHsdNozzleCount: Int,
-  onHsdNozzleCountChange: (Int) -> Unit,
   appLanguage: AppLanguage,
   onLanguageChange: (AppLanguage) -> Unit,
   isDarkTheme: Boolean,
@@ -359,6 +313,7 @@ fun MainNavigationContent(
         isDarkTheme = isDarkTheme,
         onThemeChange = onThemeChange,
         pumpName = loggedInPumpName,
+        loggedInUsername = loggedInUsername,
         loggedInMobileNumber = loggedInMobileNumber,
         adminPhone = loggedInAdminPhone,
         userRoleFromSession = userRole,
@@ -387,11 +342,8 @@ fun MainNavigationContent(
     }
     Screen.NozzleSelection -> {
         NozzleSelectionScreen(
-            initialMsCount = selectedMsNozzleCount,
-            initialHsdCount = selectedHsdNozzleCount,
             username = loggedInUsername,
             adminPhone = loggedInAdminPhone,
-            isCaModule = !isManagersModuleFlow,
             onNavigateToCalculator = { nozzles, date, caName ->
                 onNozzleListChange(nozzles)
                 onDateChange(date)
@@ -410,28 +362,13 @@ fun MainNavigationContent(
             onLogout = performLogout
         )
     }
-    Screen.FourNozzleDetails -> {
-        AuditDetailsScreen(
-            isFourNozzle = true,
-            selectedDate = selectedDate,
-            adminPhone = loggedInAdminPhone,
-            onBack = { onScreenChange(Screen.NozzleSelection) },
-            onProceed = { date, caName, meterNo ->
-                onDateChange(date)
-                onCaNameChange(caName)
-                onMeterNoChange(meterNo)
-                onScreenChange(Screen.Calculator)
-            },
-            onLogout = performLogout
-        )
-    }
     Screen.Calculator -> {
         CalculatorScreen(
-            onBack = { onScreenChange(Screen.FourNozzleDetails) },
+            onBack = { onScreenChange(Screen.NozzleSelection) },
             onSaveSuccess = { onScreenChange(Screen.Welcome) },
             date = selectedDate,
             caName = selectedCaName,
-            meterNo = selectedMeterNo,
+            meterNo = "",
             selectedNozzles = selectedNozzleList,
             phone = loggedInUsername,
             adminPhone = loggedInAdminPhone,
@@ -443,7 +380,6 @@ fun MainNavigationContent(
             onBack = { onScreenChange(Screen.Welcome) },
             date = selectedDate,
             adminPhone = loggedInAdminPhone,
-            phone = loggedInUsername,
             onLogout = performLogout
         )
     }
@@ -492,7 +428,7 @@ fun MainNavigationContent(
         DailyPumpDataScreen(adminPhone = loggedInAdminPhone, enteredBy = loggedInUsername, onBack = { onScreenChange(Screen.Welcome) })
     }
     Screen.StaffManagement -> {
-        StaffManagementScreen(adminPhone = loggedInAdminPhone, pumpName = loggedInPumpName, onBack = { onScreenChange(Screen.Welcome) })
+        StaffManagementScreen(adminPhone = loggedInAdminPhone, pumpName = loggedInPumpName, accountId = loggedInAccountId, onBack = { onScreenChange(Screen.Welcome) })
     }
     else -> { /* Handle others if needed */ }
   }

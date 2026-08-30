@@ -65,7 +65,7 @@ fun TtEntryReportScreen(
 
     fun loadEntries() {
         coroutineScope.launch(Dispatchers.IO) {
-            val list = com.example.database.FirestoreRepository.getTtEntries(adminPhone)
+            val list = com.example.database.SupabaseRepository.getTtEntries(adminPhone)
             withContext(Dispatchers.Main) {
                 allEntries = list
             }

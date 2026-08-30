@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.database.SavedAudit
 import com.example.database.DailyPumpData
-import com.example.database.FirestoreRepository
+import com.example.database.SupabaseRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,6 +44,7 @@ fun WelcomeScreen(
     isDarkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
     pumpName: String = "D R Inamdar Petroleum",
+    loggedInUsername: String = "",
     loggedInMobileNumber: String = "",
     adminPhone: String = "",
     userRoleFromSession: String = "",
@@ -73,7 +74,7 @@ fun WelcomeScreen(
 
     LaunchedEffect(adminPhone, todayDate) {
         coroutineScope.launch(Dispatchers.IO) {
-            val data = FirestoreRepository.getDailyPumpData(adminPhone, todayDate)
+            val data = SupabaseRepository.getDailyPumpData(adminPhone, todayDate)
             withContext(Dispatchers.Main) {
                 dailyPumpDataList = data
             }
@@ -102,16 +103,7 @@ fun WelcomeScreen(
                     IconButton(onClick = onDrawerOpen) { Icon(Icons.Default.Menu, "Menu", tint = Color(0xFF1E293B)) }
                 },
                 actions = {
-                    IconButton(onClick = {}) {
-                        BadgedBox(badge = { Badge(containerColor = Color.Red) { Text("3", color = Color.White) } }) {
-                            Icon(Icons.Default.NotificationsNone, "Notifications", tint = Color(0xFF1E293B))
-                        }
-                    }
-                    IconButton(onClick = {}) {
-                        Surface(color = Color(0xFF2563EB), shape = CircleShape, modifier = Modifier.size(34.dp)) {
-                            Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
-                        }
-                    }
+                    // Top-right actions removed as per requirement
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
@@ -145,17 +137,19 @@ fun WelcomeScreen(
                         Icon(Icons.Default.LocalGasStation, null, tint = Color.White.copy(alpha = 0.2f), modifier = Modifier.size(160.dp))
                     }
                     Column(modifier = Modifier.padding(28.dp).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
-                        Text("Good Morning,", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium))
+                        Text("Welcome to", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium))
                         Text(
-                            text = if (pumpName.contains(" ")) pumpName.split(" ").first() else pumpName,
+                            text = pumpName,
                             color = Color.White,
-                            style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, fontSize = 24.sp, letterSpacing = (-0.5).sp),
+                            maxLines = 2
                         )
                         Spacer(Modifier.height(12.dp))
                         Surface(color = Color(0xFF10B981), shape = CircleShape) {
                             Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Box(modifier = Modifier.size(6.dp).background(Color.White, CircleShape))
-                                Text(userRoleFromSession.ifEmpty { "Administrator" }, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                val userDisplayRole = if (userRoleFromSession.uppercase() == "ADMIN") "Owner" else userRoleFromSession
+                                Text("Active User: $loggedInUsername ($userDisplayRole)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
                             }
                         }
                         Spacer(Modifier.height(16.dp))

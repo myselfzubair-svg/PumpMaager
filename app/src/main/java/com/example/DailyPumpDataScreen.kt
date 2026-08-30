@@ -32,7 +32,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.database.DailyPumpData
-import com.example.database.FirestoreRepository
+import com.example.database.SupabaseRepository
 import kotlinx.coroutines.launch
 import java.util.*
 
@@ -80,12 +80,12 @@ fun DailyPumpDataScreen(
     LaunchedEffect(adminPhone, selectedDate) {
         isLoading = true
         coroutineScope.launch {
-            val pumpInfo = FirestoreRepository.getPumpInfo(adminPhone)
+            val pumpInfo = SupabaseRepository.getPumpInfo(adminPhone)
             val configuredProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() }?.map { it.trim() } ?: emptyList()
             
             // Fallback: Check registered nozzles if productNames is empty
             val allProducts = if (configuredProducts.isEmpty()) {
-                val nozzles = FirestoreRepository.getRegisteredNozzles(adminPhone)
+                val nozzles = SupabaseRepository.getRegisteredNozzles(adminPhone)
                 val nozzleTypes = nozzles.map { it.nozzleType }.distinct()
                 if (nozzleTypes.isEmpty()) listOf("MS", "HSD") else nozzleTypes
             } else {
@@ -95,7 +95,7 @@ fun DailyPumpDataScreen(
             products = allProducts
 
             // Fetch existing data for selected date
-            val existingData = FirestoreRepository.getDailyPumpData(adminPhone, selectedDate)
+            val existingData = SupabaseRepository.getDailyPumpData(adminPhone, selectedDate)
             
             // Clear maps first
             densityInputs.clear()
@@ -226,7 +226,7 @@ fun DailyPumpDataScreen(
                                     enteredBy = enteredBy
                                 )
                             }
-                            FirestoreRepository.saveDailyPumpData(adminPhone, selectedDate, dataList)
+                            SupabaseRepository.saveDailyPumpData(adminPhone, selectedDate, dataList)
                             isLoading = false
                             Toast.makeText(context, "Daily Pump Data Saved!", Toast.LENGTH_SHORT).show()
                             onBack()

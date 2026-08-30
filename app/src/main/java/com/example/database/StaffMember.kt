@@ -5,14 +5,18 @@ import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 @Entity(tableName = "staff_members", primaryKeys = ["phone", "ownerAdminPhone"])
+@Serializable
 data class StaffMember(
     val phone: String,
-    val ownerAdminPhone: String, // The Admin who created this staff member
+    @SerialName("owner_admin_phone") val ownerAdminPhone: String, // The Admin who created this staff member
     val name: String,
-    val passwordHash: String = "",
-    val role: String
+    @SerialName("password_hash") val passwordHash: String = "",
+    val role: String,
+    @SerialName("account_id") val accountId: String? = null
 )
 
 @Dao

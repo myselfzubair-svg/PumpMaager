@@ -114,9 +114,9 @@ object SmsOtpManager {
             }
         }
 
-        // 4. Return Simulation Status with clear instruction
-        Log.d(TAG, "No real SMS configuration found or permission granted. Running in simulated mode.")
-        return@withContext Result.success("Simulated (Demo Mode)")
+        // 4. Return Failure if no method worked
+        Log.e(TAG, "No real SMS configuration found or permission granted.")
+        return@withContext Result.failure(Exception("No SMS provider configured. Check Twilio/Fast2SMS settings or grant SMS permission."))
     }
 
     private fun sendViaTwilio(

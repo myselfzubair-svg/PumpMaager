@@ -78,18 +78,6 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
-                    if (audits.isNotEmpty()) {
-                        IconButton(
-                            onClick = { showDeleteConfirmAll = true },
-                            modifier = Modifier.testTag("history_clear_all_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteSweep,
-                                contentDescription = "Clear All History",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
                     IconButton(
                         onClick = onLogout,
                         modifier = Modifier.testTag("logout_button")
@@ -149,8 +137,8 @@ fun HistoryScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = LanguageManager.translate(
-                            "Complete a reconciliation or sales sheet, then tap the 'Save' button to persist it locally.",
-                            "एक मिलान या बिक्री शीट पूरी करें, फिर इसे स्थानीय रूप से सुरक्षित करने के लिए 'सेव' बटन पर टैप करें।"
+                            "Complete a reconciliation or sales sheet, then tap the 'Save' button to persist it to your secure Cloud Database.",
+                            "एक मिलान या बिक्री शीट पूरी करें, फिर इसे अपने सुरक्षित क्लाउड डेटाबेस में सहेजने के लिए 'सेव' बटन पर टैप करें।"
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -243,6 +231,22 @@ fun HistoryScreen(
                         }
                     }
 
+                    val groupedAudits = remember(filteredAudits) {
+                        filteredAudits.groupBy { it.meterNo.ifEmpty { "General Nozzles" } }
+                            .toSortedMap { a, b ->
+                                when {
+                                    a == "General Nozzles" && b != "General Nozzles" -> 1
+                                    a != "General Nozzles" && b == "General Nozzles" -> -1
+                                    else -> {
+                                        val aInt = a.filter { it.isDigit() }.toIntOrNull()
+                                        val bInt = b.filter { it.isDigit() }.toIntOrNull()
+                                        if (aInt != null && bInt != null) aInt.compareTo(bInt)
+                                        else a.compareTo(b, ignoreCase = true)
+                                    }
+                                }
+                            }
+                    }
+
                     if (filteredAudits.isEmpty()) {
                         Column(
                             modifier = Modifier
@@ -280,19 +284,51 @@ fun HistoryScreen(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(filteredAudits, key = { it.timestamp }) { audit ->
-                                AuditHistoryCard(
-                                    audit = audit,
-                                    onView = { selectedAudit = audit },
-                                    onEdit = { auditToEdit = audit },
-                                    onShare = {
-                                        PdfGenerator.sharePdf(context, audit.summaryText, audit.caName, audit.date)
-                                    },
-                                    onPrint = {
-                                        printSavedReportHtml(context, audit)
-                                    },
-                                    onDelete = { auditToDelete = audit }
-                                )
+                            val maxTimestamp = filteredAudits.maxOfOrNull { it.timestamp } ?: 0L
+                            
+                            groupedAudits.forEach { entry ->
+                                val meterNo = entry.key
+                                val groupList = entry.value
+                                
+                                item {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Machine/Nozzle: $meterNo",
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                                
+                                items(groupList, key = { it.timestamp }) { audit ->
+                                    val isGlobalNewest = audit.timestamp == maxTimestamp
+                                    
+                                    AuditHistoryCard(
+                                        audit = audit,
+                                        onView = { selectedAudit = audit },
+                                        onEdit = { auditToEdit = audit },
+                                        onShare = {
+                                            PdfGenerator.sharePdf(context, audit.summaryText, audit.caName, audit.date)
+                                        },
+                                        onPrint = {
+                                            printSavedReportHtml(context, audit)
+                                        },
+                                        onDelete = { 
+                                            if (isGlobalNewest) {
+                                                auditToDelete = audit
+                                            } else {
+                                                Toast.makeText(context, "Only the newest report can be deleted", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        showDelete = isGlobalNewest
+                                    )
+                                }
+                                
+                                item { Spacer(modifier = Modifier.height(8.dp)) }
                             }
                         }
                     }
@@ -397,30 +433,33 @@ fun HistoryScreen(
         val audit = auditToDelete!!
         AlertDialog(
             onDismissRequest = { auditToDelete = null },
-            title = { Text("Delete Saved Report?") },
+            title = { Text(LanguageManager.translate("Delete Report?", "रिपोर्ट हटाएं?")) },
             text = {
                 Text(
-                    "Are you sure you want to permanently delete the audit record for ${audit.caName} dated ${audit.date}?"
+                    LanguageManager.translate(
+                        "Are you sure you want to permanently delete this report and all associated data? This action cannot be undone.",
+                        "क्या आप वाकई इस रिपोर्ट और सभी संबंधित डेटा को स्थायी रूप से हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।"
+                    )
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteAudit(adminPhone, audit.date, audit.caName, audit.timestamp)
+                        viewModel.deleteAudit(adminPhone, audit.date, audit.caName, audit.timestamp, audit.reportId)
                         auditToDelete = null
-                        Toast.makeText(context, "Report deleted successfully", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, LanguageManager.translate("Report and all associated data were permanently deleted.", "रिपोर्ट और सभी संबंधित डेटा स्थायी रूप से हटा दिए गए।"), Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError
                     )
                 ) {
-                    Text("Delete")
+                    Text(LanguageManager.translate("Delete", "हटाएं"))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { auditToDelete = null }) {
-                    Text("Cancel")
+                    Text(LanguageManager.translate("Cancel", "रद्द करें"))
                 }
             }
         )
@@ -547,6 +586,7 @@ fun AuditHistoryCard(
     onShare: () -> Unit,
     onPrint: () -> Unit,
     onDelete: () -> Unit,
+    showDelete: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val badgeColor = when {
@@ -591,16 +631,18 @@ fun AuditHistoryCard(
                     )
                 }
 
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete Record",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (showDelete) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Record",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 

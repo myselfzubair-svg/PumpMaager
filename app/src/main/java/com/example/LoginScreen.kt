@@ -32,22 +32,18 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.database.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
+
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 
 data class TankConfigData(
     val id: String,
@@ -70,7 +66,7 @@ data class NozzleConfigData(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LoginScreen(
-    onLoginSuccess: (String, String, List<String>, List<String>, String, String, String) -> Unit,
+    onLoginSuccess: (String, String, List<String>, List<String>, String, String, String, String) -> Unit,
     onSkipLogin: () -> Unit,
     isDarkTheme: Boolean,
     onThemeChange: (Boolean) -> Unit,
@@ -85,13 +81,8 @@ fun LoginScreen(
     var isSignUpMode by rememberSaveable { mutableStateOf(false) }
     var username by rememberSaveable { mutableStateOf("") }
     var mobileNumber by rememberSaveable { mutableStateOf("") }
-    var isOtpSent by rememberSaveable { mutableStateOf(false) }
-    var generatedOtp by rememberSaveable { mutableStateOf("") }
-    var userEnteredOtp by rememberSaveable { mutableStateOf("") }
-    var verificationId by rememberSaveable { mutableStateOf("") }
-    var forceResendingToken by remember { mutableStateOf<com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken?>(null) }
-    var isOtpLoginMode by rememberSaveable { mutableStateOf(false) }
-    var isOtpBypassEnabled by rememberSaveable { mutableStateOf(false) }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var availableAccounts by remember { mutableStateOf<List<AccountOption>>(emptyList()) }
     var showAccountSelection by remember { mutableStateOf(false) }
@@ -99,8 +90,9 @@ fun LoginScreen(
     var mobileNumberError by remember { mutableStateOf<String?>(null) }
     var otpError by remember { mutableStateOf<String?>(null) }
     var isPumpSetupActive by rememberSaveable { mutableStateOf(false) }
-    var setupStep by rememberSaveable { mutableStateOf(1) } // 1: Basic, 2: Tanks, 3: Nozzles, 4: Readings
+    var setupStep by rememberSaveable { mutableStateOf(1) }
     var pumpName by rememberSaveable { mutableStateOf("") }
+    var ownerName by rememberSaveable { mutableStateOf("") }
     var totalTanksInput by rememberSaveable { mutableStateOf("1") }
     
     // Tank configurations
@@ -116,11 +108,12 @@ fun LoginScreen(
     var tankConfigs by remember { mutableStateOf<List<TankConfigData>>(emptyList()) }
     var nozzleConfigs by remember { mutableStateOf<List<NozzleConfigData>>(emptyList()) }
 
-    // Logic Functions (Preserved & Re-connected)
+    // Logic Functions
     val resetFormStates = {
-        usernameError = null; mobileNumberError = null; otpError = null; isOtpSent = false
-        userEnteredOtp = ""; generatedOtp = ""; isOtpLoginMode = false; isPumpSetupActive = false
-        setupStep = 1; pumpName = ""; totalTanksInput = "1"
+        usernameError = null; mobileNumberError = null; otpError = null
+        mobileNumber = ""; password = ""; confirmPassword = ""
+        isPumpSetupActive = false
+        setupStep = 1; pumpName = ""; ownerName = ""; totalTanksInput = "1"
         tankLabels = listOf("Tank 1"); tankProductTypes = listOf("MS")
         tankNozzleCounts = listOf(1); tankNozzleReadings = listOf(listOf("0"))
         tankNozzleNames = listOf(listOf("")); tankNozzleNumbers = listOf(listOf("1"))
@@ -131,13 +124,13 @@ fun LoginScreen(
     val proceedWithAccount: (AccountOption) -> Unit = { selectedAccount ->
         isLoading = true
         coroutineScope.launch(Dispatchers.IO) {
-            val pumpInfo = com.example.database.FirestoreRepository.getPumpInfo(selectedAccount.ownerAdminPhone)
-            val registeredList = com.example.database.FirestoreRepository.getRegisteredNozzles(selectedAccount.ownerAdminPhone)
+            val pumpInfo = SupabaseRepository.getPumpInfo(selectedAccount.ownerAdminPhone)
+            val registeredList = SupabaseRepository.getRegisteredNozzles(selectedAccount.ownerAdminPhone)
             val finalMsLabels = registeredList.filter { it.nozzleType == "MS" }.sortedBy { it.nozzleIndex }.map { it.label }
             val finalHsdLabels = registeredList.filter { it.nozzleType == "HSD" }.sortedBy { it.nozzleIndex }.map { it.label }
             withContext(Dispatchers.Main) {
                 isLoading = false
-                onLoginSuccess(selectedAccount.username, pumpInfo?.pumpName ?: selectedAccount.pumpName, finalMsLabels, finalHsdLabels, selectedAccount.mobileNumber, selectedAccount.ownerAdminPhone, selectedAccount.role)
+                onLoginSuccess(selectedAccount.username, pumpInfo?.pumpName ?: selectedAccount.pumpName, finalMsLabels, finalHsdLabels, selectedAccount.mobileNumber, selectedAccount.ownerAdminPhone, selectedAccount.role, selectedAccount.accountId)
             }
         }
     }
@@ -146,13 +139,14 @@ fun LoginScreen(
         isLoading = true
         val options = mutableListOf<AccountOption>()
         withContext(Dispatchers.IO) {
-            val remoteResult = com.example.database.FirestoreUserManager.getUserMemberships(formattedMobile)
+            val remoteResult = SupabaseUserManager.getUserMemberships(formattedMobile)
             remoteResult.onSuccess { memberships ->
                 memberships.forEach { m ->
-                    val adminPhone = m["adminPhone"] as? String ?: ""
-                    val pName = m["pumpName"] as? String ?: "Cloud Pump"
-                    val role = m["role"] as? String ?: "Staff"
-                    val cloudUsername = m["username"] as? String ?: "Cloud User"
+                    val adminPhone = m.adminPhone
+                    val pName = m.pumpName ?: "Cloud Pump"
+                    val role = m.role ?: "Staff"
+                    val cloudUsername = m.username ?: "Cloud User"
+                    val mAccountId = m.accountId ?: ""
                     
                     val desc = when(role.uppercase()) {
                         "ADMIN" -> "Full administrative access"
@@ -162,16 +156,16 @@ fun LoginScreen(
                     }
 
                     if (options.none { it.ownerAdminPhone == adminPhone && it.role == role }) {
-                        options.add(AccountOption(cloudUsername, pName, role, desc, formattedMobile, adminPhone))
+                        options.add(AccountOption(cloudUsername, pName, role, desc, formattedMobile, adminPhone, mAccountId))
                     }
                 }
             }
             if (options.none { it.role == "ADMIN" && it.ownerAdminPhone == formattedMobile }) {
-                val checkResult = com.example.database.FirestoreUserManager.checkUserInFirestore(formattedMobile)
-                checkResult.onSuccess { userData ->
-                    if (userData != null) {
-                        val storedUsername = userData["username"] as? String ?: "Admin"
-                        options.add(AccountOption(storedUsername, storedUsername, "ADMIN", "Full administrative access", formattedMobile, formattedMobile))
+                val checkResult = SupabaseUserManager.checkUserInSupabase(formattedMobile)
+                checkResult.onSuccess { user ->
+                    if (user != null) {
+                        val storedUsername = user.username ?: "Admin"
+                        options.add(AccountOption(storedUsername, user.pumpName ?: storedUsername, "ADMIN", "Full administrative access", formattedMobile, formattedMobile, user.id ?: ""))
                     }
                 }
             }
@@ -179,37 +173,9 @@ fun LoginScreen(
         withContext(Dispatchers.Main) {
             isLoading = false
             if (options.isEmpty()) mobileNumberError = "No account found in Cloud."
-            else if (options.size == 1) proceedWithAccount(options.first())
-            else { availableAccounts = options; showAccountSelection = true; isOtpSent = false }
-        }
-    }
-
-    val dispatchOtpFlow: suspend (String, String) -> Unit = { formattedMobile, rawMobile ->
-        if (isOtpBypassEnabled) {
-            isLoading = false; verificationId = "simulated"; generatedOtp = "1234"; isOtpSent = true
-        } else {
-            val activity = context as? Activity
-            if (activity != null) {
-                com.example.database.FirebasePhoneAuthManager.startPhoneNumberVerification(
-                    activity, formattedMobile, object : com.example.database.FirebasePhoneAuthManager.VerificationCallbacks {
-                        override fun onCodeSent(id: String, token: com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken) {
-                            isLoading = false; verificationId = id; forceResendingToken = token; isOtpSent = true
-                        }
-                        override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                            isLoading = true
-                            com.example.database.FirebasePhoneAuthManager.signInWithCredential(credential) { result ->
-                                coroutineScope.launch(Dispatchers.Main) {
-                                    isLoading = false
-                                    result.onSuccess {
-                                        if (isSignUpMode) { pumpName = username.trim(); isPumpSetupActive = true; isOtpSent = false }
-                                        else completeLoginFlow(formattedMobile, rawMobile)
-                                    }.onFailure { otpError = it.localizedMessage }
-                                }
-                            }
-                        }
-                        override fun onVerificationFailed(e: Exception) { isLoading = false; mobileNumberError = e.localizedMessage }
-                    }
-                )
+            else { 
+                availableAccounts = options
+                showAccountSelection = true
             }
         }
     }
@@ -218,37 +184,64 @@ fun LoginScreen(
         focusManager.clearFocus()
         val u = username.trim()
         val m = mobileNumber.trim()
-        if (isOtpSent) {
-            val entered = userEnteredOtp.trim()
-            if (entered == "1234" && verificationId == "simulated") {
-                coroutineScope.launch {
-                    val formatted = com.example.database.FirestoreUserManager.formatMobileNumber(m)
-                    if (isSignUpMode) { pumpName = u; isPumpSetupActive = true; isOtpSent = false }
-                    else completeLoginFlow(formatted, m)
-                }
-            } else if (verificationId != "simulated") {
+        
+        if (isSignUpMode && !isPumpSetupActive) {
+            // Sign Up validation
+            if (u.isEmpty() || ownerName.isEmpty() || m.isEmpty() || password.isEmpty() || confirmPassword.isEmpty()) {
+                if (u.isEmpty()) usernameError = "Required"
+                if (ownerName.isEmpty()) mobileNumberError = "Required" 
+                if (m.isEmpty()) mobileNumberError = "Required"
+                if (password.isEmpty()) otpError = "Required"
+                if (confirmPassword.isEmpty()) otpError = "Required"
+            } else if (password != confirmPassword) {
+                otpError = "Passwords do not match"
+            } else if (password.length < 6) {
+                otpError = "Min 6 digits"
+            } else {
                 isLoading = true
-                val credential = com.google.firebase.auth.PhoneAuthProvider.getCredential(verificationId, entered)
-                com.example.database.FirebasePhoneAuthManager.signInWithCredential(credential) { result ->
-                    coroutineScope.launch(Dispatchers.Main) {
+                coroutineScope.launch {
+                    val f = SmsOtpManager.formatMobileNumber(m)
+                    val check = SupabaseUserManager.checkUserInSupabase(f)
+                    if (check.getOrNull() != null) {
+                        mobileNumberError = "Already registered"
                         isLoading = false
-                        result.onSuccess {
-                            if (isSignUpMode) { pumpName = u; isPumpSetupActive = true; isOtpSent = false }
-                            else { val f = com.example.database.FirestoreUserManager.formatMobileNumber(m); completeLoginFlow(f, m) }
-                        }.onFailure { otpError = it.localizedMessage }
+                    } else {
+                        // Directly proceed to pump setup for signup as requested (no OTP)
+                        isLoading = false
+                        pumpName = u
+                        isPumpSetupActive = true
                     }
                 }
             }
-        } else {
-            if (m.isNotEmpty()) {
+        } else if (!isSignUpMode) {
+            // LOGIN MODE
+            if (m.isEmpty() || password.isEmpty()) {
+                mobileNumberError = if (m.isEmpty()) "Required" else null
+                otpError = if (password.isEmpty()) "Required" else null
+            } else {
                 isLoading = true
                 coroutineScope.launch {
-                    val f = com.example.database.FirestoreUserManager.formatMobileNumber(m)
-                    if (isSignUpMode) {
-                        val check = com.example.database.FirestoreUserManager.checkUserInFirestore(f)
-                        if (check.getOrNull() != null) { mobileNumberError = "Already registered"; isLoading = false }
-                        else dispatchOtpFlow(f, m)
-                    } else dispatchOtpFlow(f, m)
+                    val f = SmsOtpManager.formatMobileNumber(m)
+                    
+                    // 1. Check Owners (users table)
+                    val ownerResult = SupabaseUserManager.checkUserInSupabase(f)
+                    val owner = ownerResult.getOrNull()
+                    
+                    if (owner != null && owner.passwordHash == password) {
+                        isLoading = false
+                        completeLoginFlow(f, m)
+                        return@launch
+                    }
+
+                    // 2. Check Staff (staff_members table)
+                    val staff = SupabaseRepository.getStaffMemberByPhoneOnly(f)
+                    if (staff != null && staff.passwordHash == password) {
+                        isLoading = false
+                        completeLoginFlow(f, m)
+                    } else {
+                        isLoading = false
+                        otpError = "Invalid login ID or password"
+                    }
                 }
             }
         }
@@ -258,7 +251,7 @@ fun LoginScreen(
         isLoading = true
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val formattedMobile = com.example.database.FirestoreUserManager.formatMobileNumber(mobileNumber)
+                val formattedMobile = SmsOtpManager.formatMobileNumber(mobileNumber)
                 
                 // Use the new hierarchical nozzle configs
                 val allRegisteredNozzles = nozzleConfigs.mapIndexed { index, config ->
@@ -298,17 +291,33 @@ fun LoginScreen(
                     updatedAt = System.currentTimeMillis()
                 )
                 
-                com.example.database.FirestoreRepository.savePumpInfo(newPumpInfo)
-                com.example.database.FirestoreRepository.saveNozzles(formattedMobile, allRegisteredNozzles)
+                // Sequential saves removed in favor of atomic registration
+                val registrationParams = RegistrationParams(
+                    p_user_data = SupabaseUser(
+                        mobileNumber = formattedMobile,
+                        username = ownerName,
+                        ownerName = ownerName,
+                        pumpName = pumpName,
+                        role = "ADMIN",
+                        passwordHash = password
+                    ),
+                    p_pump_data = newPumpInfo,
+                    p_nozzles = allRegisteredNozzles
+                )
                 
-                com.example.database.FirestoreUserManager.saveUserToFirestore(formattedMobile, username, "", "")
+                val userResult = SupabaseUserManager.registerOwnerAtomic(registrationParams)
+                userResult.getOrThrow()
                 
                 withContext(Dispatchers.Main) {
-                    isLoading = false; isSignUpMode = false; isPumpSetupActive = false; isOtpSent = false
-                    Toast.makeText(context, "Setup Success!", Toast.LENGTH_LONG).show()
+                    isLoading = false; isSignUpMode = false; isPumpSetupActive = false
+                    resetFormStates()
+                    Toast.makeText(context, "Registration Successful! Please login with your password.", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { isLoading = false }
+                withContext(Dispatchers.Main) { 
+                    isLoading = false
+                    Toast.makeText(context, "Registration Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -378,12 +387,12 @@ fun LoginScreen(
                 }.background(Brush.linearGradient(colors = listOf(Color(0xFF3B82F6), Color(0xFF8B5CF6))), RoundedCornerShape(32.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(imageVector = Icons.Default.Calculate, contentDescription = null, modifier = Modifier.size(54.dp), tint = Color.White)
+                Icon(imageVector = Icons.Default.LocalGasStation, contentDescription = null, modifier = Modifier.size(54.dp), tint = Color.White)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            Text("Identity Access", style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black, letterSpacing = (-1).sp))
+            Text("Pump Manager", style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black, letterSpacing = (-1).sp))
             Text("Smart Station Reconciliation System", style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), letterSpacing = 0.5.sp))
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -396,33 +405,54 @@ fun LoginScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             ) {
                 AnimatedContent(
-                    targetState = if (isPumpSetupActive) "setup" else if (isOtpSent) "otp" else if (showAccountSelection) "selection" else "login",
+                    targetState = if (isPumpSetupActive) "setup" else if (showAccountSelection) "selection" else "login",
                     transitionSpec = { (fadeIn(tween(500)) + slideInHorizontally { it / 2 }).togetherWith(fadeOut(tween(500)) + slideOutHorizontally { -it / 2 }) },
                     label = "auth_flow"
                 ) { state ->
                     Column(modifier = Modifier.padding(32.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         when (state) {
                             "login" -> {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(text = if (isSignUpMode) "New Station" else "Login Portal", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold))
-                                    Text(text = "Provide your authorized mobile number", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(text = if (isSignUpMode) "Register New Account" else "Login", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold))
+                                        Text(text = if (isSignUpMode) "Create a new user account" else "Enter your registered mobile number", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (isSignUpMode) {
+                                        PremiumTextField(value = ownerName, onValueChange = { ownerName = it; mobileNumberError = null }, label = "Owner Name", icon = Icons.Default.Person)
+                                        PremiumTextField(value = username, onValueChange = { username = it; usernameError = null }, label = "Pump Name", icon = Icons.Default.Place, error = usernameError)
+                                    }
+                                    PremiumTextField(value = mobileNumber, onValueChange = { mobileNumber = it; mobileNumberError = null }, label = "Mobile Number (Login ID)", icon = Icons.Default.Phone, error = mobileNumberError, keyboardType = KeyboardType.Phone, onDone = { handleAuth() })
+                                    
+                                    PremiumTextField(
+                                        value = password, 
+                                        onValueChange = { password = it; otpError = null }, 
+                                        label = if (isSignUpMode) "Create Password" else "Password", 
+                                        icon = Icons.Default.Lock, 
+                                        error = if (!isSignUpMode) otpError else null,
+                                        keyboardType = KeyboardType.NumberPassword,
+                                        isPassword = true,
+                                        onDone = { if (!isSignUpMode) handleAuth() }
+                                    )
+
+                                    if (isSignUpMode) {
+                                        PremiumTextField(value = confirmPassword, onValueChange = { confirmPassword = it; otpError = null }, label = "Confirm Password", icon = Icons.Default.Lock, error = otpError, keyboardType = KeyboardType.NumberPassword, isPassword = true, onDone = { handleAuth() })
+                                    }
+
+                                    PremiumButton(text = if (isSignUpMode) "Register" else "Login", isLoading = isLoading, onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); handleAuth() })
+                                    
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                        Text("  OR  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                        Text(text = "New here?", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); isSignUpMode = !isSignUpMode; resetFormStates() }) {
+                                            Text(text = if (isSignUpMode) "Already verified? Sign In" else "Register New Account", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black, color = Color(0xFF3B82F6)))
+                                        }
+                                    }
                                 }
-                                if (isSignUpMode) PremiumTextField(value = username, onValueChange = { username = it; usernameError = null }, label = "Pump Name", icon = Icons.Default.Place, error = usernameError)
-                                PremiumTextField(value = mobileNumber, onValueChange = { mobileNumber = it; mobileNumberError = null }, label = "Mobile Number (+91...)", icon = Icons.Default.Phone, error = mobileNumberError, keyboardType = KeyboardType.Phone, onDone = { handleAuth() })
-                                PremiumButton(text = "Authorize & Send OTP", isLoading = isLoading, onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); handleAuth() })
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
-                                TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); isSignUpMode = !isSignUpMode; resetFormStates() }, modifier = Modifier.fillMaxWidth()) {
-                                    Text(text = if (isSignUpMode) "Already verified? Sign In" else "Register new station", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black, color = Color(0xFF3B82F6)))
-                                }
-                            }
-                            "otp" -> {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(text = "Verification", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold))
-                                    Text(text = "Enter 4-digit code sent to $mobileNumber", style = MaterialTheme.typography.bodySmall)
-                                }
-                                PremiumTextField(value = userEnteredOtp, onValueChange = { userEnteredOtp = it; otpError = null }, label = "4-Digit OTP", icon = Icons.Default.Pin, error = otpError, keyboardType = KeyboardType.Number, onDone = { handleAuth() })
-                                PremiumButton(text = "Verify Access", isLoading = isLoading, onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); handleAuth() })
-                                TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); isOtpSent = false }, modifier = Modifier.fillMaxWidth()) { Text("Change Phone Number") }
                             }
                             "selection" -> {
                                 Text(text = "Choose Account", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold))
@@ -437,6 +467,8 @@ fun LoginScreen(
                                     onStepChange = { setupStep = it },
                                     pumpName = pumpName,
                                     onPumpNameChange = { pumpName = it },
+                                    ownerName = ownerName,
+                                    onOwnerNameChange = { ownerName = it },
                                     totalTanksInput = totalTanksInput,
                                     onTotalTanksChange = { totalTanksInput = it },
                                     tankLabels = tankLabels,
@@ -477,7 +509,16 @@ fun LoginScreen(
 }
 
 @Composable
-fun PremiumTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, error: String? = null, keyboardType: KeyboardType = KeyboardType.Text, onDone: () -> Unit = {}) {
+fun PremiumTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    error: String? = null,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    isPassword: Boolean = false,
+    onDone: () -> Unit = {}
+) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         OutlinedTextField(
             value = value, onValueChange = onValueChange,
@@ -486,6 +527,7 @@ fun PremiumTextField(value: String, onValueChange: (String) -> Unit, label: Stri
             isError = error != null, singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
+            visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Color(0xFF3B82F6), unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                 focusedContainerColor = MaterialTheme.colorScheme.surface, unfocusedContainerColor = MaterialTheme.colorScheme.surface
@@ -595,6 +637,8 @@ fun PetrolPumpSetupFlow(
     onStepChange: (Int) -> Unit,
     pumpName: String,
     onPumpNameChange: (String) -> Unit,
+    ownerName: String,
+    onOwnerNameChange: (String) -> Unit,
     totalTanksInput: String,
     onTotalTanksChange: (String) -> Unit,
     tankLabels: List<String>,
@@ -631,6 +675,7 @@ fun PetrolPumpSetupFlow(
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("Step 1: Basic & Products", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                     PremiumTextField(value = pumpName, onValueChange = onPumpNameChange, label = "Pump Name (Business Name)", icon = Icons.Default.Business)
+                    PremiumTextField(value = ownerName, onValueChange = onOwnerNameChange, label = "Owner's Name (Full Name)", icon = Icons.Default.Person)
                     
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
                     
@@ -687,6 +732,10 @@ fun PetrolPumpSetupFlow(
                     PremiumButton(text = "Next: Configure Tanks", isLoading = false) {
                         if (pumpName.isBlank()) {
                             Toast.makeText(context, "Pump name is required", Toast.LENGTH_SHORT).show()
+                            return@PremiumButton
+                        }
+                        if (ownerName.isBlank()) {
+                            Toast.makeText(context, "Owner name is required", Toast.LENGTH_SHORT).show()
                             return@PremiumButton
                         }
                         if (selectedProducts.isEmpty()) {
@@ -761,7 +810,7 @@ fun PetrolPumpSetupFlow(
                             NozzleConfigData(
                                 id = "NOZ_${tank.id}_1",
                                 name = "${tank.name} Nozzle 1",
-                                number = (tankConfigs.indexOf(tank) + 1).toString(),
+                                number = "",
                                 product = tank.product,
                                 productId = "PROD_${tank.product.uppercase().replace(" ", "_")}",
                                 tankName = tank.name,
@@ -775,10 +824,10 @@ fun PetrolPumpSetupFlow(
                 TextButton(onClick = { onStepChange(1) }, modifier = Modifier.fillMaxWidth()) { Text("Back") }
             }
             3 -> {
-                // STEP 3: Configure Nozzles for Each Tank
+                // STEP 3: Configure Nozzles (Grouped by Product)
                 Text("Step 3: Configure Nozzles", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                 
-                tankConfigs.forEach { tank ->
+                nozzleConfigs.groupBy { it.product }.forEach { (product, nozzles) ->
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         shape = RoundedCornerShape(16.dp),
@@ -786,36 +835,34 @@ fun PetrolPumpSetupFlow(
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                Column {
-                                    Text(tank.name, fontWeight = FontWeight.Black, color = Color(0xFF3B82F6))
-                                    Text(tank.product, style = MaterialTheme.typography.labelSmall)
-                                }
-                                val tankNozzles = nozzleConfigs.filter { it.tankId == tank.id }
+                                Text(product, fontWeight = FontWeight.Black, color = Color(0xFF3B82F6))
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     IconButton(onClick = {
-                                        if (tankNozzles.size > 1) {
-                                            val toRemove = tankNozzles.last()
+                                        if (nozzles.size > 1) {
+                                            val toRemove = nozzles.last()
                                             onNozzleConfigsChange(nozzleConfigs - toRemove)
                                         }
                                     }) { Icon(Icons.Default.Remove, null) }
-                                    Text("${tankNozzles.size} Nozzles", fontWeight = FontWeight.Bold)
+                                    Text("${nozzles.size} Nozzles", fontWeight = FontWeight.Bold)
                                     IconButton(onClick = {
-                                        val newIdx = tankNozzles.size + 1
+                                        // Pick first tank for this product to associate the new nozzle
+                                        val targetTank = tankConfigs.firstOrNull { it.product == product } ?: tankConfigs.first()
+                                        val newIdx = nozzles.size + 1
                                         val newNoz = NozzleConfigData(
-                                            id = "NOZ_${tank.id}_$newIdx",
-                                            name = "${tank.name} Nozzle $newIdx",
+                                            id = "NOZ_${targetTank.id}_${System.currentTimeMillis()}",
+                                            name = "${product} Nozzle $newIdx",
                                             number = "",
-                                            product = tank.product,
-                                            productId = "PROD_${tank.product.uppercase().replace(" ", "_")}",
-                                            tankName = tank.name,
-                                            tankId = tank.id
+                                            product = product,
+                                            productId = "PROD_${product.uppercase().replace(" ", "_")}",
+                                            tankName = targetTank.name,
+                                            tankId = targetTank.id
                                         )
                                         onNozzleConfigsChange(nozzleConfigs + newNoz)
                                     }) { Icon(Icons.Default.Add, null) }
                                 }
                             }
                             
-                            nozzleConfigs.filter { it.tankId == tank.id }.forEach { nozzle ->
+                            nozzles.forEach { nozzle ->
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
                                         value = nozzle.number,
@@ -880,17 +927,23 @@ fun PetrolPumpSetupFlow(
                 // STEP 4: Initial Readings
                 Text("Step 4: Initial Meter Readings", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                 
-                nozzleConfigs.groupBy { it.tankName }.forEach { (tankName, nozzles) ->
+                nozzleConfigs.groupBy { it.product }.forEach { (product, nozzles) ->
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
-                        Text(tankName, fontWeight = FontWeight.ExtraBold, color = Color(0xFF3B82F6))
+                        Text(product, fontWeight = FontWeight.ExtraBold, color = Color(0xFF3B82F6))
                         nozzles.forEach { nozzle ->
                             OutlinedTextField(
                                 value = nozzle.initialReading,
                                 onValueChange = { newVal ->
+                                    var seenDot = false
+                                    val sanitized = newVal.filter { char ->
+                                        if (char == '.') {
+                                            if (seenDot) false else { seenDot = true; true }
+                                        } else char.isDigit()
+                                    }
                                     val updated = nozzleConfigs.toMutableList()
                                     val idx = updated.indexOfFirst { it.id == nozzle.id }
                                     if (idx != -1) {
-                                        updated[idx] = updated[idx].copy(initialReading = newVal.filter { it.isDigit() || it == '.' })
+                                        updated[idx] = updated[idx].copy(initialReading = sanitized)
                                         onNozzleConfigsChange(updated)
                                     }
                                 },

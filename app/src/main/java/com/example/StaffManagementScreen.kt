@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.Activity
 import android.widget.Toast
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -19,9 +20,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.database.StaffMember
-import com.example.database.FirestoreUserManager
-import com.example.database.FirestoreRepository
-import com.example.database.SmsOtpManager
+import com.example.database.SupabaseUserManager
+import com.example.database.SupabaseRepository
+import com.example.database.SupabaseMembership
+import com.example.database.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +34,7 @@ import kotlinx.coroutines.withContext
 fun StaffManagementScreen(
     adminPhone: String,
     pumpName: String = "Pump",
+    accountId: String = "",
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -38,7 +42,7 @@ fun StaffManagementScreen(
     var staffList by remember { mutableStateOf<List<StaffMember>>(emptyList()) }
 
     LaunchedEffect(adminPhone) {
-        FirestoreRepository.getStaffMembersFlow(adminPhone).collect { list ->
+        SupabaseRepository.getStaffMembersFlow(adminPhone).collect { list ->
             staffList = list
         }
     }
@@ -49,15 +53,9 @@ fun StaffManagementScreen(
     var selectedRole by remember { mutableStateOf("CA") }
     var isSubmitting by remember { mutableStateOf(false) }
 
-    // OTP States
-    var isOtpSent by remember { mutableStateOf(false) }
-    var generatedOtp by remember { mutableStateOf("") }
-    var userEnteredOtp by remember { mutableStateOf("") }
-    var otpError by remember { mutableStateOf<String?>(null) }
-
     val resetAddStaffForm = {
         staffName = ""; staffPhone = ""; selectedRole = "CA"
-        isOtpSent = false; generatedOtp = ""; userEnteredOtp = ""; otpError = null; isSubmitting = false
+        isSubmitting = false
     }
 
     Scaffold(
@@ -111,6 +109,8 @@ fun StaffManagementScreen(
                                     Column {
                                         Text(staff.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                         Text(staff.phone, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                        val displayPwd = staff.passwordHash.ifBlank { staff.phone.filter { it.isDigit() }.takeLast(10) }
+                                        Text("Login Password: $displayPwd", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                         Surface(
                                             color = if (staff.role == "MANAGER") Color(0xFFF59E0B).copy(alpha = 0.1f) else Color(0xFF2563EB).copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp),
@@ -127,7 +127,7 @@ fun StaffManagementScreen(
                                     }
                                     IconButton(onClick = {
                                         coroutineScope.launch(Dispatchers.IO) {
-                                            FirestoreRepository.deleteStaffMember(staff.phone, adminPhone)
+                                            SupabaseRepository.deleteStaffMember(staff.phone, adminPhone)
                                         }
                                     }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
@@ -145,103 +145,97 @@ fun StaffManagementScreen(
                     border = BorderStroke(1.dp, Color(0xFFF1F5F9))
                 ) {
                     Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (!isOtpSent) {
-                            Text("Register New Staff", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            OutlinedTextField(
-                                value = staffName,
-                                onValueChange = { staffName = it },
-                                label = { Text("Staff Name") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            OutlinedTextField(
-                                value = staffPhone,
-                                onValueChange = { staffPhone = it },
-                                label = { Text("Mobile Number (+91...)") },
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Assign Role", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("CA", "MANAGER").forEach { role ->
-                                        FilterChip(
-                                            selected = selectedRole == role,
-                                            onClick = { selectedRole = role },
-                                            label = { Text(role) },
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                    }
+                        Text("Register New Staff", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        OutlinedTextField(
+                            value = staffName,
+                            onValueChange = { staffName = it },
+                            label = { Text("Staff Name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = staffPhone,
+                            onValueChange = { staffPhone = it },
+                            label = { Text("Mobile Number (Login ID)") },
+                            placeholder = { Text("Enter 10-digit number") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Assign Role", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("CA", "MANAGER").forEach { role ->
+                                    FilterChip(
+                                        selected = selectedRole == role,
+                                        onClick = { selectedRole = role },
+                                        label = { Text(role) },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
                                 }
                             }
-                            Button(
-                                onClick = {
-                                    if (staffName.trim().length < 3) { Toast.makeText(context, "Name too short", Toast.LENGTH_SHORT).show(); return@Button }
-                                    if (!staffPhone.startsWith("+") || staffPhone.trim().length < 10) { Toast.makeText(context, "Invalid mobile number (with country code)", Toast.LENGTH_SHORT).show(); return@Button }
-                                    isSubmitting = true
-                                    coroutineScope.launch {
-                                        val code = (1000..9999).random().toString()
-                                        val result = SmsOtpManager.sendOtp(context, staffPhone, code)
-                                        isSubmitting = false
-                                        result.onSuccess { status ->
-                                            generatedOtp = code; isOtpSent = true
-                                            Toast.makeText(context, "Code Sent: $status", Toast.LENGTH_LONG).show()
-                                            if (status.contains("Simulated")) Toast.makeText(context, "DEBUG: Code is $code", Toast.LENGTH_LONG).show()
-                                        }.onFailure { e -> Toast.makeText(context, "Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show() }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().height(50.dp),
-                                enabled = !isSubmitting,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isSubmitting) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
-                                else Text("Send Verification Code", fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            Text("Verify Number", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text(
-                                text = "A verification code has been sent to $staffPhone. Please enter it to authorize this staff member.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.Gray
-                            )
-                            OutlinedTextField(
-                                value = userEnteredOtp,
-                                onValueChange = { userEnteredOtp = it; otpError = null },
-                                label = { Text("4-Digit OTP") },
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                isError = otpError != null,
-                                supportingText = { if (otpError != null) Text(otpError!!) },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Button(
-                                onClick = {
-                                    if (userEnteredOtp == generatedOtp) {
-                                        isSubmitting = true
-                                        coroutineScope.launch(Dispatchers.IO) {
-                                            val newStaff = StaffMember(staffPhone, adminPhone, staffName, "", selectedRole)
-                                            FirestoreRepository.addStaffMember(newStaff)
-                                            FirestoreUserManager.addStaffMembership(staffPhone, adminPhone, staffName, pumpName, selectedRole)
-                                            withContext(Dispatchers.Main) {
-                                                resetAddStaffForm(); activeTab = 0
-                                                Toast.makeText(context, "Staff verified and added!", Toast.LENGTH_SHORT).show()
-                                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Note: No OTP required. Staff can login immediately using their mobile number as Login ID and the 10-digit number as Password.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        Button(
+                            onClick = {
+                                if (staffName.trim().length < 3) {
+                                    Toast.makeText(context, "Name too short", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val rawPhone = staffPhone.trim().replace("+91", "").replace(" ", "")
+                                if (rawPhone.length < 10) {
+                                    Toast.makeText(context, "Invalid 10-digit mobile number", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val formattedPhone = "+91$rawPhone"
+                                val password = rawPhone // Password is 10-digit mobile number
+
+                                isSubmitting = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val newStaff = StaffMember(formattedPhone, adminPhone, staffName.trim(), password, selectedRole, accountId)
+                                        SupabaseRepository.addStaffMember(newStaff)
+                                        
+                                        // Also add membership
+                                        val membership = SupabaseMembership(
+                                            staffPhone = formattedPhone,
+                                            adminPhone = adminPhone,
+                                            pumpName = pumpName,
+                                            username = staffName.trim(),
+                                            role = selectedRole,
+                                            accountId = accountId
+                                        )
+                                        SupabaseClient.client.postgrest["memberships"].upsert(membership)
+                                        
+                                        withContext(Dispatchers.Main) {
+                                            isSubmitting = false
+                                            resetAddStaffForm()
+                                            activeTab = 0
+                                            Toast.makeText(context, "Staff added successfully. Password is $password", Toast.LENGTH_LONG).show()
                                         }
-                                    } else { otpError = "Invalid code. Please check and try again." }
-                                },
-                                modifier = Modifier.fillMaxWidth().height(50.dp),
-                                enabled = !isSubmitting,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isSubmitting) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
-                                else Text("Verify & Add Staff Member", fontWeight = FontWeight.Bold)
-                            }
-                            TextButton(onClick = { isOtpSent = false; userEnteredOtp = "" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                                Text("Change Phone Number")
-                            }
+                                    } catch (e: Exception) {
+                                        withContext(Dispatchers.Main) {
+                                            isSubmitting = false
+                                            Toast.makeText(context, "Error adding staff: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            enabled = !isSubmitting,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (isSubmitting) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
+                            else Text("ADD STAFF MEMBER", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

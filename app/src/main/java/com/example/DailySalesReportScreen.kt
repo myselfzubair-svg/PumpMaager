@@ -44,8 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.database.HistoryViewModel
-import com.example.database.HsdNozzleReading
-import com.example.database.MsNozzleReading
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -75,13 +73,11 @@ fun DailySalesReportScreen(
     var allDailyConfigs by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
     LaunchedEffect(adminPhone) {
         if (adminPhone.isNotBlank()) {
-            allDailyConfigs = com.example.database.FirestoreRepository.getAllDailyConfigs(adminPhone)
+            allDailyConfigs = com.example.database.SupabaseRepository.getAllDailyConfigs(adminPhone)
         }
     }
 
     // Fetch all nozzle readings from DB to aggregate dynamically
-    val allMsReadings: List<MsNozzleReading> by historyViewModel.allMsNozzleReadings.collectAsState(initial = emptyList())
-    val allHsdReadings: List<HsdNozzleReading> by historyViewModel.allHsdNozzleReadings.collectAsState(initial = emptyList())
     val allGeneralReadings: List<com.example.database.GeneralNozzleReading> by historyViewModel.allGeneralNozzleReadings.collectAsState(initial = emptyList())
     val allAudits: List<com.example.database.SavedAudit> by historyViewModel.allAudits.collectAsState(initial = emptyList())
 
@@ -89,7 +85,7 @@ fun DailySalesReportScreen(
     var stationProducts by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(adminPhone) {
         if (adminPhone.isNotBlank()) {
-            val pumpInfo = com.example.database.FirestoreRepository.getPumpInfo(adminPhone)
+            val pumpInfo = com.example.database.SupabaseRepository.getPumpInfo(adminPhone)
             stationProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() } ?: listOf("MS", "HSD")
         }
     }
@@ -106,41 +102,26 @@ fun DailySalesReportScreen(
     }
 
     // Build dataset for each day of the month
-    val dailyDataList = remember(daysInMonthList, allMsReadings, allHsdReadings, allGeneralReadings, allAudits, allDailyConfigs, stationProducts) {
+    val dailyDataList = remember(daysInMonthList, allGeneralReadings, allAudits, allDailyConfigs, stationProducts) {
         daysInMonthList.map { dateStr ->
             val dayAudits = allAudits.filter { it.date == dateStr }
             val dayCashSubmitted = dayAudits.sumOf { it.cashSubmitted }
             val dayActualCashCollected = dayAudits.sumOf { it.actualCashCollected }
             val dayTotalCashCollected = dayCashSubmitted + dayActualCashCollected
+            val dayTotalKharch = dayAudits.sumOf { it.totalKharch }
+            val dayTotalUdhar = dayAudits.sumOf { it.totalUdhar }
 
             val productDataList = stationProducts.map { product ->
-                // Filter all sources of nozzle readings
-                val legacyReadings = if (isSameProduct(product, "MS")) {
-                    allMsReadings.filter { it.date == dateStr }
-                } else if (isSameProduct(product, "HSD")) {
-                    allHsdReadings.filter { it.date == dateStr }
-                } else emptyList<Any>()
-
                 val genReadings = allGeneralReadings.filter { it.date == dateStr && isSameProduct(it.productName, product) }
                 
                 // Aggregate sales & testing
                 val nozzleAggregator = mutableMapOf<String, MutableList<Pair<Double, Double>>>() // label -> list of (opening, closing)
                 val testingMap = mutableMapOf<String, Double>() // label -> total testing
 
-                // Process General Readings
+                // Process General Readings (Unified source)
                 genReadings.groupBy { it.nozzleLabel }.forEach { (label, readings) ->
                     nozzleAggregator.getOrPut(label) { mutableListOf() }.addAll(readings.map { it.openingReading to it.closingReading })
                     testingMap[label] = (testingMap[label] ?: 0.0) + readings.sumOf { it.testing }
-                }
-
-                // Process Legacy Readings (Combine all recorded data)
-                legacyReadings.forEach { r ->
-                    val label = if (r is MsNozzleReading) r.nozzleLabel else (r as HsdNozzleReading).nozzleLabel
-                    val readings = if (r is MsNozzleReading) r.openingReading to r.closingReading else (r as HsdNozzleReading).openingReading to (r as HsdNozzleReading).closingReading
-                    val testing = if (r is MsNozzleReading) r.testing else (r as HsdNozzleReading).testing
-                    
-                    nozzleAggregator.getOrPut(label) { mutableListOf() }.add(readings)
-                    testingMap[label] = (testingMap[label] ?: 0.0) + testing
                 }
 
                 var productSalesLitres = 0.0
@@ -190,7 +171,9 @@ fun DailySalesReportScreen(
                 products = productDataList,
                 cashSubmitted = dayCashSubmitted,
                 actualCashCollected = dayActualCashCollected,
-                totalCashCollected = dayTotalCashCollected
+                totalCashCollected = dayTotalCashCollected,
+                totalKharch = dayTotalKharch,
+                totalUdhar = dayTotalUdhar
             )
         }
     }
@@ -437,6 +420,46 @@ fun DailySalesReportScreen(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Monthly Total Expenses (Kharch)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val totalKharchVal = dailyDataList.sumOf { it.totalKharch }
+                            Text(
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", totalKharchVal)}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFFC62828)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Monthly Total Credits (Udhar)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val totalUdharVal = dailyDataList.sumOf { it.totalUdhar }
+                            Text(
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", totalUdharVal)}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFFE65100)
+                            )
+                        }
                     }
                 }
             }
@@ -599,6 +622,16 @@ fun DailySalesReportScreen(
                                             label = LanguageManager.translate("Actual Cash Collected (₹)", "वास्तविक नकद संग्रह (₹)"),
                                             value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.actualCashCollected)}"
                                         )
+                                        DetailRow(
+                                            label = "Daily Expenses (Kharch) (₹)",
+                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.totalKharch)}",
+                                            color = Color(0xFFC62828)
+                                        )
+                                        DetailRow(
+                                            label = "Credits Given (Udhar) (₹)",
+                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.totalUdhar)}",
+                                            color = Color(0xFFE65100)
+                                        )
                                         HorizontalDivider(
                                             modifier = Modifier.padding(vertical = 4.dp),
                                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
@@ -741,7 +774,9 @@ data class DailySalesReportData(
     val products: List<ProductDayData>,
     val cashSubmitted: Double = 0.0,
     val actualCashCollected: Double = 0.0,
-    val totalCashCollected: Double = 0.0
+    val totalCashCollected: Double = 0.0,
+    val totalKharch: Double = 0.0,
+    val totalUdhar: Double = 0.0
 )
 
 data class ProductDayData(
@@ -1012,6 +1047,9 @@ private fun printMonthlySalesReportPdf(
     """.trimIndent())
 
     // Cash Sheet
+    val monthlyTotalKharch = dailyRecords.sumOf { it.totalKharch }
+    val monthlyTotalUdhar = dailyRecords.sumOf { it.totalUdhar }
+
     htmlBuilder.append("""
             <div class="page">
                 <div class="header">
@@ -1025,10 +1063,12 @@ private fun printMonthlySalesReportPdf(
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 25%;">Date</th>
-                            <th style="width: 25%; text-align: right;">Cash Submitted (₹)</th>
-                            <th style="width: 25%; text-align: right;">Actual Cash Collected (₹)</th>
-                            <th style="width: 25%; text-align: right; background-color: #faf5ff; color: #7209b7;">Total Cash Collected (₹)</th>
+                            <th style="width: 20%;">Date</th>
+                            <th style="width: 15%; text-align: right;">Cash Sub. (₹)</th>
+                            <th style="width: 15%; text-align: right;">Actual Cash (₹)</th>
+                            <th style="width: 15%; text-align: right;">Kharch (₹)</th>
+                            <th style="width: 15%; text-align: right;">Udhar (₹)</th>
+                            <th style="width: 20%; text-align: right; background-color: #faf5ff; color: #7209b7;">Total Cash (₹)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1038,9 +1078,11 @@ private fun printMonthlySalesReportPdf(
         htmlBuilder.append("""
             <tr>
                 <td><strong>${rec.date}</strong></td>
-                <td class="num">${if (rec.cashSubmitted > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", rec.cashSubmitted) else "--"}</td>
-                <td class="num">${if (rec.actualCashCollected > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", rec.actualCashCollected) else "--"}</td>
-                <td class="num" style="font-weight: bold; background-color: #faf5ff; color: #7209b7;">${if (rec.totalCashCollected > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", rec.totalCashCollected) else "--"}</td>
+                <td class="num">${if (rec.cashSubmitted > 0) String.format(Locale.getDefault(), "%,.2f", rec.cashSubmitted) else "--"}</td>
+                <td class="num">${if (rec.actualCashCollected > 0) String.format(Locale.getDefault(), "%,.2f", rec.actualCashCollected) else "--"}</td>
+                <td class="num" style="color:#c62828;">${if (rec.totalKharch > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalKharch) else "--"}</td>
+                <td class="num" style="color:#e65100;">${if (rec.totalUdhar > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalUdhar) else "--"}</td>
+                <td class="num" style="font-weight: bold; background-color: #faf5ff; color: #7209b7;">${if (rec.totalCashCollected > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalCashCollected) else "--"}</td>
             </tr>
         """.trimIndent())
     }
@@ -1048,9 +1090,11 @@ private fun printMonthlySalesReportPdf(
     htmlBuilder.append("""
                         <tr class="total-row">
                             <td>TOTALS</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashSubmitted)}</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalActualCashCollected)}</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold; background-color: #faf5ff; color: #7209b7;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashCollected)}</td>
+                            <td class="num" style="font-size: 9px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashSubmitted)}</td>
+                            <td class="num" style="font-size: 9px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalActualCashCollected)}</td>
+                            <td class="num" style="font-size: 9px; font-weight: bold; color:#c62828;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalKharch)}</td>
+                            <td class="num" style="font-size: 9px; font-weight: bold; color:#e65100;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalUdhar)}</td>
+                            <td class="num" style="font-size: 9px; font-weight: bold; background-color: #faf5ff; color: #7209b7;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashCollected)}</td>
                         </tr>
                     </tbody>
                 </table>

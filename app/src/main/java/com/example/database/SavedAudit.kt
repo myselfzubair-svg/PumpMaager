@@ -1,19 +1,30 @@
 package com.example.database
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-@Entity(tableName = "saved_audits")
+@Serializable
 data class SavedAudit(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val ownerAdminPhone: String, // Multi-tenancy isolation
+    val id: Int? = null,
+    @SerialName("owner_admin_phone") val ownerAdminPhone: String, // Multi-tenancy isolation
     val date: String,
-    val caName: String,
-    val meterNo: String,
-    val auditType: String, // "2 Nozzles", "4 Nozzles", "Full Day"
-    val summaryText: String,
-    val htmlContent: String,
+    @SerialName("ca_name") val caName: String,
+    @SerialName("meter_no") val meterNo: String,
+    @SerialName("audit_type") val auditType: String, // "2 Nozzles", "4 Nozzles", "Full Day"
+    @SerialName("summary_text") val summaryText: String,
+    @SerialName("html_content") val htmlContent: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val cashSubmitted: Double = 0.0,
-    val actualCashCollected: Double = 0.0
+    @SerialName("cash_submitted") val cashSubmitted: Double = 0.0,
+    @SerialName("actual_cash_collected") val actualCashCollected: Double = 0.0,
+    @SerialName("report_id") val reportId: String = "",
+    
+    // Structured Financial Data
+    @SerialName("total_fuel_sales_amount") val totalFuelSalesAmount: Double = 0.0,
+    @SerialName("total_udhari_jama") val totalUdhariJama: Double = 0.0,
+    @SerialName("total_kharch") val totalKharch: Double = 0.0,
+    @SerialName("total_udhar") val totalUdhar: Double = 0.0,
+    @SerialName("phone_pe_amount") val phonePeAmount: Double = 0.0,
+    @SerialName("cards_amount") val cardsAmount: Double = 0.0,
+    @SerialName("expected_cash_balance") val expectedCashBalance: Double = 0.0,
+    @SerialName("tally_difference") val tallyDifference: Double = 0.0
 )

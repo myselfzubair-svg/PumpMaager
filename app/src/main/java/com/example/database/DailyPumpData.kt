@@ -2,17 +2,20 @@ package com.example.database
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 @Entity(tableName = "daily_pump_data")
+@Serializable
 data class DailyPumpData(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val adminPhone: String,
+    @PrimaryKey(autoGenerate = true) val id: Long? = null,
+    @SerialName("admin_phone") val adminPhone: String,
     val date: String,
-    val productName: String,
-    val productId: String = "",
-    val density: Double,
-    val rate: Double,
-    val openingStock: Double,
-    val enteredBy: String,
+    @SerialName("product_name") val productName: String,
+    @SerialName("product_id") val productId: String = "",
+    val density: Double = 0.0,
+    val rate: Double = 0.0,
+    @SerialName("opening_stock") val openingStock: Double = 0.0,
+    @SerialName("entered_by") val enteredBy: String,
     val timestamp: Long = System.currentTimeMillis()
 )

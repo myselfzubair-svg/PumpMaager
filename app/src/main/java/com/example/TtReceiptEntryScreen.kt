@@ -536,7 +536,7 @@ fun TtReceiptEntryScreen(
                                 )
 
                                 coroutineScope.launch(Dispatchers.IO) {
-                                    com.example.database.FirestoreRepository.saveTtEntry(newEntry)
+                                    com.example.database.SupabaseRepository.saveTtEntry(newEntry)
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(context, "TT Receipt saved successfully!", Toast.LENGTH_SHORT).show()
                                         // Reset fields

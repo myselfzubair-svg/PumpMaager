@@ -1,23 +1,24 @@
 package com.example.database
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-@Entity(tableName = "general_nozzle_readings")
+@Serializable
 data class GeneralNozzleReading(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val ownerAdminPhone: String,
-    val productName: String,
-    val nozzleLabel: String,
-    val openingReading: Double,
-    val closingReading: Double,
-    val testing: Double,
-    val caName: String,
+    val id: Long? = null,
+    @SerialName("owner_admin_phone") val ownerAdminPhone: String,
+    @SerialName("product_name") val productName: String,
+    @SerialName("nozzle_label") val nozzleLabel: String,
+    @SerialName("opening_reading") val openingReading: Double = 0.0,
+    @SerialName("closing_reading") val closingReading: Double = 0.0,
+    val testing: Double = 0.0,
+    @SerialName("ca_name") val caName: String,
     val phone: String,
-    val udhar: Double,
-    val kharch: Double,
-    val udhariJama: Double,
-    val productSalesAmount: Double,
+    val udhar: Double = 0.0,
+    val kharch: Double = 0.0,
+    @SerialName("udhari_jama") val udhariJama: Double = 0.0,
+    @SerialName("product_sales_amount") val productSalesAmount: Double = 0.0,
     val timestamp: Long = System.currentTimeMillis(),
-    val date: String = ""
+    val date: String = "",
+    @SerialName("report_id") val reportId: String = ""
 )

@@ -3,6 +3,7 @@ package com.example
 import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,13 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.database.HistoryViewModel
-import com.example.database.MsNozzleReading
-import com.example.database.HsdNozzleReading
-import com.example.database.GeneralNozzleReading
+import com.example.database.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 data class UdhariJamaItem(
@@ -347,14 +347,11 @@ fun FourNozzleCard(
     title: String,
     closingVal: String,
     openingVal: String,
-    actualSale: Double,
-    salesAmount: Double,
+    netSale: Double,
     onClosingChanged: (String) -> Unit,
     onOpeningChanged: (String) -> Unit,
     closingTag: String,
     openingTag: String,
-    actualSaleTag: String,
-    salesAmountTag: String,
     badgeColor: Color,
     badgeTextColor: Color,
     modifier: Modifier = Modifier
@@ -393,7 +390,7 @@ fun FourNozzleCard(
                 }
 
                 Text(
-                    text = "ACTIVE AUDIT",
+                    text = "READINGS",
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         fontWeight = FontWeight.Bold
@@ -448,54 +445,22 @@ fun FourNozzleCard(
                 }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // Sub-Results Row (Actual sale, sales amount)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "ACTUAL SALE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 8.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                    Text(
-                        text = formatDouble(actualSale) + " L",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = Color.Black,
-                        modifier = Modifier.testTag(actualSaleTag)
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "SALES AMOUNT",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
-                            color = Color(0xFF222222),
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-                    Text(
-                        text = "₹ " + formatDouble(salesAmount),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF222222)
-                        ),
-                        modifier = Modifier.testTag(salesAmountTag)
-                    )
-                }
+                Text(
+                    text = "NET SALE (LITRES)",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                )
+                Text(
+                    text = formatDouble(netSale) + " L",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace),
+                    color = badgeColor
+                )
             }
         }
     }
@@ -520,7 +485,8 @@ fun CalculatorScreen(
     // Dynamic Nozzle States
     val nozzleReadings = remember { 
         mutableStateListOf<com.example.database.NozzleReadingEntry>().apply {
-            addAll(selectedNozzles.map { 
+            // Sort nozzles by number ascending for consistent order
+            addAll(selectedNozzles.sortedBy { it.nozzleNumber.toIntOrNull() ?: 999 }.map { 
                 com.example.database.NozzleReadingEntry(
                     nozzleId = it.nozzleId,
                     nozzleName = it.nozzleName,
@@ -585,15 +551,32 @@ fun CalculatorScreen(
     var newUdhariNameInput by remember { mutableStateOf("") }
 
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    var jamaPartyBalance by remember { mutableStateOf(0.0) }
+    var udharPartyBalance by remember { mutableStateOf(0.0) }
+    
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(tempUdhariJamaName, adminPhone) {
+        if (adminPhone.isNotBlank() && tempUdhariJamaName.isNotBlank() && tempUdhariJamaName != "Miscellaneous") {
+            jamaPartyBalance = com.example.database.SupabaseRepository.getPartyBalance(adminPhone, tempUdhariJamaName)
+        }
+    }
+
+    LaunchedEffect(tempUdharName, adminPhone) {
+        if (adminPhone.isNotBlank() && tempUdharName.isNotBlank() && tempUdharName != "Miscellaneous") {
+            udharPartyBalance = com.example.database.SupabaseRepository.getPartyBalance(adminPhone, tempUdharName)
+        }
+    }
 
     LaunchedEffect(date, adminPhone, phone) {
         if (adminPhone.isNotBlank()) {
             historyViewModel.setAdminPhone(adminPhone)
             
             // 1. Resolve Products (from setup info + actual selected nozzles)
-            val pumpInfo = com.example.database.FirestoreRepository.getPumpInfo(adminPhone)
+            val pumpInfo = com.example.database.SupabaseRepository.getPumpInfo(adminPhone)
             val configuredProducts = pumpInfo?.productNames?.split(",")?.filter { it.isNotBlank() }?.map { it.trim() } ?: emptyList()
             val nozzleProducts = selectedNozzles.map { it.nozzleType }.distinct()
             val allProducts = (configuredProducts + nozzleProducts).distinct()
@@ -607,7 +590,7 @@ fun CalculatorScreen(
             }
 
             // 2. Load Daily Rates
-            val dailyData = com.example.database.FirestoreRepository.getDailyPumpData(adminPhone, date)
+            val dailyData = com.example.database.SupabaseRepository.getDailyPumpData(adminPhone, date)
             finalProducts.forEach { productName ->
                 val pid = generateProductId(productName)
                 val rateObj = dailyData.find { it.productId == pid } 
@@ -622,57 +605,27 @@ fun CalculatorScreen(
             }
 
             // 3. Load Opening Readings (Observe history changes to fill accurately)
-            // We launch a collection to ensure we get data even if it arrives slightly later
             launch {
                 combine(
                     historyViewModel.allGeneralNozzleReadings,
                     historyViewModel.allMsNozzleReadings,
                     historyViewModel.allHsdNozzleReadings
-                ) { gen: List<GeneralNozzleReading>, ms: List<MsNozzleReading>, hsd: List<HsdNozzleReading> ->
-                    Triple(gen, ms, hsd)
-                }.collect { (genReadings, msReadings, hsdReadings) ->
+                ) { _, _, _ -> Unit }.collect {
                     nozzleReadings.forEachIndexed { index, nozzle ->
                         val rate = productRates.entries.find { isSameProduct(it.key, nozzle.nozzleType) }?.value ?: 0.0
-                        
-                        // Smart Opening Retrieval Logic
-                        // Tier 1: Latest on selected date
-                        val dayGen = genReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                        val dayMs = msReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                        val dayHsd = hsdReadings.filter { it.date == date && it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                        
-                        val latestDayReading = listOfNotNull(dayGen?.closingReading, dayMs?.closingReading, dayHsd?.closingReading).firstOrNull()
+                        val latest = historyViewModel.getLatestClosingReadingForNozzle(nozzle.nozzleName, adminPhone, date)
+                        val openingValStr = if (latest % 1.0 == 0.0) latest.toLong().toString() else latest.toString()
 
-                        var openingVal: Double? = latestDayReading
-                        
-                        // Tier 2: Absolute latest in history (if no entry today)
-                        if (openingVal == null) {
-                            val histGen = genReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                            val histMs = msReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                            val histHsd = hsdReadings.filter { it.nozzleLabel == nozzle.nozzleName }.maxByOrNull { it.timestamp }
-                            
-                            openingVal = listOfNotNull(histGen?.closingReading, histMs?.closingReading, histHsd?.closingReading).firstOrNull()
-                        }
-
-                        // Tier 3: Fallback to initialReading from setup
-                        val openingValStr = if (openingVal != null) {
-                            if (openingVal % 1.0 == 0.0) openingVal.toLong().toString() else openingVal.toString()
-                        } else {
-                            val initialVal = historyViewModel.getInitialReadingForNozzle(nozzle.nozzleName, adminPhone)
-                            if (initialVal % 1.0 == 0.0) initialVal.toLong().toString() else initialVal.toString()
-                        }
-
-                        // Update list if currently empty (to avoid overwriting user entry during shift)
                         if (nozzleReadings[index].openingReading.isEmpty()) {
                             nozzleReadings[index] = nozzleReadings[index].copy(rate = rate, openingReading = openingValStr)
                         } else {
-                            // Just update rate
                             nozzleReadings[index] = nozzleReadings[index].copy(rate = rate)
                         }
                     }
                 }
             }
             
-            udhariNamesList = com.example.database.FirestoreRepository.getUdhariNames(adminPhone)
+            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
         }
     }
 
@@ -1432,8 +1385,9 @@ fun CalculatorScreen(
         """.trimIndent()
     }
 
-    Scaffold(
-        topBar = {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
             TopAppBar(
                 title = {
                     Column {
@@ -1551,6 +1505,21 @@ fun CalculatorScreen(
                                     context,
                                     "Please enter closing reading for: ${missingClosings.joinToString { it.nozzleName }}",
                                     Toast.LENGTH_SHORT
+                                ).show()
+                                return@Button
+                            }
+
+                            // Validation: Closing >= Opening
+                            val invalidReadings = nozzleReadings.filter {
+                                val open = it.openingReading.toDoubleOrNull() ?: 0.0
+                                val close = it.closingReading.toDoubleOrNull() ?: 0.0
+                                close < open
+                            }
+                            if (invalidReadings.isNotEmpty()) {
+                                Toast.makeText(
+                                    context,
+                                    "Closing reading cannot be less than opening for: ${invalidReadings.joinToString { it.nozzleName }}",
+                                    Toast.LENGTH_LONG
                                 ).show()
                                 return@Button
                             }
@@ -1713,8 +1682,7 @@ fun CalculatorScreen(
                             title = "${nozzle.nozzleName} (#${nozzle.nozzleNumber})",
                             closingVal = nozzle.closingReading,
                             openingVal = nozzle.openingReading,
-                            actualSale = nozzle.salesQuantity,
-                            salesAmount = nozzle.salesAmount,
+                            netSale = nozzle.salesQuantity,
                             onClosingChanged = { newVal ->
                                 nozzleReadings[actualIndex] = nozzleReadings[actualIndex].copy(closingReading = sanitizeInput(newVal))
                             },
@@ -1723,8 +1691,6 @@ fun CalculatorScreen(
                             },
                             closingTag = "noz_${nozzle.nozzleId}_closing",
                             openingTag = "noz_${nozzle.nozzleId}_opening",
-                            actualSaleTag = "noz_${nozzle.nozzleId}_sale",
-                            salesAmountTag = "noz_${nozzle.nozzleId}_amt",
                             badgeColor = badgeColor,
                             badgeTextColor = badgeTextColor
                         )
@@ -1824,10 +1790,10 @@ fun CalculatorScreen(
                                             val name = newUdhariNameInput.trim()
                                             if (name.isNotEmpty()) {
                                                 if (!udhariNamesList.contains(name)) {
-                                                    val newList = udhariNamesList + name
+                                                    val newList = (udhariNamesList + name).distinct().sorted()
                                                     udhariNamesList = newList
                                                     coroutineScope.launch {
-                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                        com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, newList)
                                                     }
                                                 }
                                                 tempUdhariJamaName = name
@@ -1908,6 +1874,17 @@ fun CalculatorScreen(
                                 )
                             }
                         }
+                    }
+
+                    if (tempUdhariJamaName.isNotBlank() && tempUdhariJamaName != "Miscellaneous") {
+                        Text(
+                            text = "Outstanding Balance: ₹ ${formatDouble(jamaPartyBalance)}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (jamaPartyBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
+                            ),
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -2095,15 +2072,6 @@ fun CalculatorScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = LanguageManager.salesReconciliationTitle,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2125,117 +2093,6 @@ fun CalculatorScreen(
                             ),
                             modifier = Modifier.testTag("ms_hsd_sales_total_display")
                         )
-                    }
-
-                    // Product-Wise Systematic Reconciliation Table
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            // Table Header with Horizontal Scroll for narrow screens
-                            val scrollState = androidx.compose.foundation.rememberScrollState()
-                            
-                            Column(modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
-                                Row(
-                                    modifier = Modifier
-                                        .widthIn(min = 600.dp)
-                                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                                        .padding(vertical = 10.dp, horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text("Product Identity", modifier = Modifier.width(100.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black))
-                                    Text("Opening", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                    Text("Closing", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                    Text("Sales Qty", modifier = Modifier.width(80.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                    Text("Rate/L", modifier = Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                    Text("Calc Amt", modifier = Modifier.width(90.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                    Text("Reconciled Amt", modifier = Modifier.width(100.dp), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black), textAlign = TextAlign.End)
-                                }
-
-                                pumpProducts.forEach { product ->
-                                    val summary = productSummaries[product]
-                                    if (summary != null && summary.nozzles.isNotEmpty()) {
-                                        val isMs = isSameProduct(product, "MS")
-                                        val isHsd = isSameProduct(product, "HSD")
-                                        val productBadgeColor = when {
-                                            isMs -> MaterialTheme.colorScheme.primary
-                                            isHsd -> MaterialTheme.colorScheme.tertiary
-                                            else -> Color(0xFF8B5CF6)
-                                        }
-
-                                        Row(
-                                            modifier = Modifier
-                                                .widthIn(min = 600.dp)
-                                                .padding(vertical = 8.dp, horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = product,
-                                                modifier = Modifier.width(100.dp).clickable {
-                                                    // Dynamic link to details
-                                                },
-                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                                color = productBadgeColor
-                                            )
-                                            Text(
-                                                text = formatDouble(summary.totalOpening),
-                                                modifier = Modifier.width(80.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                                textAlign = TextAlign.End
-                                            )
-                                            Text(
-                                                text = formatDouble(summary.totalClosing),
-                                                modifier = Modifier.width(80.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                                textAlign = TextAlign.End
-                                            )
-                                            Text(
-                                                text = formatDouble(summary.grossSale) + " L",
-                                                modifier = Modifier.width(80.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                                textAlign = TextAlign.End
-                                            )
-                                            Text(
-                                                text = formatDouble(summary.rate),
-                                                modifier = Modifier.width(70.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                                textAlign = TextAlign.End
-                                            )
-                                            Text(
-                                                text = "₹" + formatDouble(summary.calculatedSalesAmount),
-                                                modifier = Modifier.width(90.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                                textAlign = TextAlign.End
-                                            )
-                                            Text(
-                                                text = "₹" + formatDouble(summary.reconciledSalesAmount),
-                                                modifier = Modifier.width(100.dp),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
-                                                textAlign = TextAlign.End,
-                                                color = productBadgeColor
-                                            )
-                                        }
-                                        HorizontalDivider(modifier = Modifier.widthIn(min = 600.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                    } else {
-                                        // Product exists in setup but has no nozzles selected
-                                        Row(
-                                            modifier = Modifier.widthIn(min = 600.dp).padding(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(product, modifier = Modifier.width(100.dp), style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
-                                            Text(
-                                                text = if (summary?.nozzles?.isEmpty() == true) "⚠ NO NOZZLE DATA MISSING" else "⚠ RATE NOT CONFIGURED",
-                                                style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold),
-                                                modifier = Modifier.weight(1f),
-                                                textAlign = TextAlign.Center
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     Row(
@@ -2283,28 +2140,56 @@ fun CalculatorScreen(
                         }
                     }
 
-                    Row(
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
                     ) {
-                        Text(
-                            text = "Sales Grand Total",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = "₹ " + formatDouble(grandTotal),
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            ),
-                            modifier = Modifier.testTag("four_nozzle_grand_total_display")
-                        )
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Sales Grand Total",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "(Total Income to be reconciled)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                    )
+                                }
+                                Text(
+                                    text = "₹ " + formatDouble(grandTotal),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier.testTag("four_nozzle_grand_total_display")
+                                )
+                            }
+                        }
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        Text(
+                            text = "  DEDUCTIONS START HERE  ",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    }
 
                     // PhonePe input row
                     Row(
@@ -2466,7 +2351,6 @@ fun CalculatorScreen(
                         } else {
                             Text(
                                 text = "₹ 0",
-                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -2683,10 +2567,10 @@ fun CalculatorScreen(
                                             val name = newUdharNameInput.trim()
                                             if (name.isNotEmpty()) {
                                                 if (!udhariNamesList.contains(name)) {
-                                                    val newList = udhariNamesList + name
+                                                    val newList = (udhariNamesList + name).distinct().sorted()
                                                     udhariNamesList = newList
                                                     coroutineScope.launch {
-                                                        com.example.database.FirestoreRepository.saveUdhariNames(adminPhone, newList)
+                                                        com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, newList)
                                                     }
                                                 }
                                                 tempUdharName = name
@@ -2786,6 +2670,17 @@ fun CalculatorScreen(
                                 unfocusedContainerColor = MaterialTheme.colorScheme.surface
                             ),
                             shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+
+                    if (tempUdharName.isNotBlank() && tempUdharName != "Miscellaneous") {
+                        Text(
+                            text = "Outstanding Balance: ₹ ${formatDouble(udharPartyBalance)}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (udharPartyBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
+                            ),
+                            modifier = Modifier.padding(horizontal = 8.dp)
                         )
                     }
 
@@ -3398,52 +3293,141 @@ fun CalculatorScreen(
                 Button(
                     onClick = {
                         showSaveConfirmDialog = false
+                        isLoading = true
                         
-                        // Execute Save logic
-                        val report = getSummaryText()
-                        val htmlReport = generateA4HtmlReport()
-                        historyViewModel.saveAudit(
-                            adminPhone = adminPhone,
-                            date = date,
-                            caName = caName,
-                            meterNo = meterNo,
-                            auditType = "Shift Report & Tally",
-                            summaryText = report,
-                            htmlContent = htmlReport,
-                            cashSubmitted = cashSubmittedAmount,
-                            actualCashCollected = actualCashInHand
-                        )
+                        coroutineScope.launch {
+                            try {
+                                val sharedTimestamp = System.currentTimeMillis()
+                                val reportId = java.util.UUID.randomUUID().toString()
+                                val summaryReport = getSummaryText()
+                                val htmlReport = generateA4HtmlReport()
+                                
+                                val effectiveMeterNo = if (meterNo.isBlank()) {
+                                    selectedNozzles.map { it.nozzleNumber }.distinct().sorted().joinToString(", ")
+                                } else meterNo
 
-                        // Save individual nozzle readings to the database (Unified General Table)
-                        val generalReadingsToSave = nozzleReadings.map { nozzle ->
-                            val opening = nozzle.openingReading.toDoubleOrNull() ?: 0.0
-                            val closing = nozzle.closingReading.toDoubleOrNull() ?: 0.0
-                            val productName = nozzle.nozzleType
-                            val testingForProduct = testingValues[productName]?.toDoubleOrNull() ?: 0.0
-                            val summary = productSummaries[productName]
-                            
-                            com.example.database.GeneralNozzleReading(
-                                ownerAdminPhone = adminPhone,
-                                productName = productName,
-                                nozzleLabel = nozzle.nozzleName,
-                                openingReading = opening,
-                                closingReading = closing,
-                                testing = testingForProduct,
-                                caName = caName,
-                                phone = phone,
-                                udhar = totalUdhar,
-                                kharch = totalKharch,
-                                udhariJama = totalUdhariJama,
-                                productSalesAmount = summary?.reconciledSalesAmount ?: 0.0,
-                                date = date
-                            )
+                                // 1. Save Main Audit Record
+                                val audit = SavedAudit(
+                                    ownerAdminPhone = adminPhone,
+                                    date = date,
+                                    caName = caName,
+                                    meterNo = effectiveMeterNo,
+                                    auditType = "Shift Report & Tally",
+                                    summaryText = summaryReport,
+                                    htmlContent = htmlReport,
+                                    timestamp = sharedTimestamp,
+                                    cashSubmitted = cashSubmittedAmount,
+                                    actualCashCollected = actualCashInHand,
+                                    reportId = reportId,
+                                    totalFuelSalesAmount = totalFuelSalesAmount,
+                                    totalUdhariJama = totalUdhariJama,
+                                    totalKharch = totalKharch,
+                                    totalUdhar = totalUdhar,
+                                    phonePeAmount = phonePeAmount,
+                                    cardsAmount = cardsAmount,
+                                    expectedCashBalance = finalNetCash,
+                                    tallyDifference = cashDiscrepancy
+                                )
+                                com.example.database.SupabaseRepository.saveAudit(audit)
+
+                                // Sync Udhari Names
+                                val namesInJama = udhariJamaList.map { it.name }
+                                val namesInUdhar = udharList.map { it.name }
+                                val allUsedNames = (namesInJama + namesInUdhar).filter { it.isNotBlank() && it != "Miscellaneous" && it != "Legacy" }.distinct()
+                                if (allUsedNames.isNotEmpty()) {
+                                    val currentList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+                                    val newList = (currentList + allUsedNames).distinct().sortedBy { it.lowercase() }
+                                    if (newList.size > currentList.size) {
+                                        com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, newList)
+                                    }
+                                }
+
+                                // 2. Save Nozzle Readings
+                                val readingsToSave = nozzleReadings.map { nozzle ->
+                                    val opening = nozzle.openingReading.toDoubleOrNull() ?: 0.0
+                                    val closing = nozzle.closingReading.toDoubleOrNull() ?: 0.0
+                                    val productName = nozzle.nozzleType
+
+                                    val nozzlesForThisProduct = nozzleReadings.count { it.nozzleType == productName }
+                                    val totalTestingForProduct = testingValues[productName]?.toDoubleOrNull() ?: 0.0
+                                    val distributedTesting = if (nozzlesForThisProduct > 0) totalTestingForProduct / nozzlesForThisProduct else 0.0
+                                    val netSales = (closing - opening) - distributedTesting
+
+                                    NozzleReading(
+                                        reportId = reportId,
+                                        ownerAdminPhone = adminPhone,
+                                        productName = productName,
+                                        date = date,
+                                        caName = caName,
+                                        timestamp = sharedTimestamp,
+                                        nozzleLabel = nozzle.nozzleName,
+                                        opening = opening,
+                                        closing = closing,
+                                        testing = distributedTesting,
+                                        netSales = netSales
+                                    )
+                                }
+                                if (readingsToSave.isNotEmpty()) {
+                                    com.example.database.SupabaseRepository.saveNozzleReadings(readingsToSave)
+                                }
+
+                                // 3. Save Financial Entries
+                                val creditEntries = udharList.map { item ->
+                                    CreditEntry(
+                                        reportId = reportId,
+                                        ownerAdminPhone = adminPhone,
+                                        party = item.name,
+                                        description = "${item.product} (${formatDouble(item.litres)}L @ ₹${formatDouble(item.rate)}) ${item.description}",
+                                        amount = item.amount,
+                                        date = date,
+                                        timestamp = sharedTimestamp,
+                                        caName = caName
+                                    )
+                                }
+                                if (creditEntries.isNotEmpty()) com.example.database.SupabaseRepository.saveCreditEntries(creditEntries)
+                                
+                                val expenseEntries = kharchList.map { (desc, amt) ->
+                                    ExpenseEntry(
+                                        reportId = reportId,
+                                        ownerAdminPhone = adminPhone,
+                                        category = "General",
+                                        description = desc,
+                                        amount = amt,
+                                        date = date,
+                                        timestamp = sharedTimestamp,
+                                        caName = caName
+                                    )
+                                }
+                                if (expenseEntries.isNotEmpty()) com.example.database.SupabaseRepository.saveExpenseEntries(expenseEntries)
+                                
+                                val recoveryEntries = udhariJamaList.map { item ->
+                                    RecoveryEntry(
+                                        reportId = reportId,
+                                        ownerAdminPhone = adminPhone,
+                                        party = item.name,
+                                        description = "${item.product} ${item.description}",
+                                        amount = item.amount,
+                                        date = date,
+                                        timestamp = sharedTimestamp,
+                                        caName = caName
+                                    )
+                                }
+                                if (recoveryEntries.isNotEmpty()) com.example.database.SupabaseRepository.saveRecoveryEntries(recoveryEntries)
+
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                    Toast.makeText(context, "Report Saved Successfully!", Toast.LENGTH_LONG).show()
+                                    clearAllInputs()
+                                    onSaveSuccess?.invoke()
+                                }
+                            } catch (e: Exception) {
+                                Log.e("CalculatorScreen", "Save failed", e)
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                    Toast.makeText(context, "Save Failed: ${e.localizedMessage ?: "Unknown Error"}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
-                        if (generalReadingsToSave.isNotEmpty()) historyViewModel.insertGeneralNozzleReadings(generalReadingsToSave)
-
-                        Toast.makeText(context, "Report Saved to History!", Toast.LENGTH_LONG).show()
-
-                        clearAllInputs()
-                        onSaveSuccess?.invoke()
                     }
                 ) {
                     Text(LanguageManager.translate("Save", "सहेजें"))
@@ -3457,8 +3441,19 @@ fun CalculatorScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
-}
 
+    if (isLoading) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color.Black.copy(alpha = 0.4f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+}
 private fun shareReport(context: android.content.Context, reportText: String) {
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
