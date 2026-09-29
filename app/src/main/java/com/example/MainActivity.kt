@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -31,9 +32,25 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    enableEdgeToEdge()
+    
     setContent {
       var isDarkTheme by remember { mutableStateOf(false) }
+
+      // Update system bar styling whenever theme changes
+      DisposableEffect(isDarkTheme) {
+        enableEdgeToEdge(
+          statusBarStyle = SystemBarStyle.auto(
+            android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+          ) { isDarkTheme },
+          navigationBarStyle = SystemBarStyle.auto(
+            android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+          ) { isDarkTheme }
+        )
+        onDispose {}
+      }
+
       MyApplicationTheme(darkTheme = isDarkTheme) {
         MainNavigationFlow(isDarkTheme = isDarkTheme, onThemeChange = { isDarkTheme = it })
       }
@@ -45,8 +62,8 @@ enum class Screen {
   Login, Welcome, ModuleSelection, NozzleSelection, 
   Calculator, FullDayCalculator, History, ManagerDashboard, 
   DailySalesReport, TtReceiptEntry, TtEntryReport, MonthlyExpensesReport, 
-  MonthlyCreditReport, MonthlyUdhariJamaReport, CustomerUdhariLedgerReport,
-  DailyPumpData, StaffManagement
+  MonthlyUdhariJamaReport, CustomerUdhariLedgerReport,
+  DailyPumpData, StaffManagement, DensityHistory, PriceHistory, CashToBank
 }
 
 @Composable
@@ -170,6 +187,7 @@ fun MainNavigationFlow(
               list.add("Fuel Rates" to Icons.Default.CurrencyRupee)
               list.add("Opening Stock" to Icons.Default.Storage)
               list.add("TT Receipt" to Icons.Default.LocalShipping)
+              list.add("Cash to Bank" to Icons.Default.AccountBalance)
             }
             
             list.add("CA Module" to Icons.Default.LocalGasStation)
@@ -199,6 +217,7 @@ fun MainNavigationFlow(
                 else if (label == "Daily Audit") { isManagersModuleFlow = true; currentScreen = Screen.FullDayCalculator }
                 else if (label == "Morning Density" || label == "Fuel Rates" || label == "Opening Stock") { currentScreen = Screen.DailyPumpData }
                 else if (label == "TT Receipt") { isManagersModuleFlow = true; currentScreen = Screen.TtReceiptEntry }
+                else if (label == "Cash to Bank") { currentScreen = Screen.CashToBank }
               },
               shape = RoundedCornerShape(12.dp),
               colors = NavigationDrawerItemDefaults.colors(
@@ -218,7 +237,12 @@ fun MainNavigationFlow(
         ) {
           Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
             BottomNavItem("Home", Icons.Default.Home, currentScreen == Screen.Welcome) { currentScreen = Screen.Welcome }
-            BottomNavItem("Reports", Icons.Default.Assessment, currentScreen == Screen.ManagerDashboard) { isManagersModuleFlow = true; currentScreen = Screen.ManagerDashboard }
+            if (userRole.uppercase() != "CA") {
+                BottomNavItem("Reports", Icons.Default.Assessment, currentScreen == Screen.ManagerDashboard) { 
+                    isManagersModuleFlow = true
+                    currentScreen = Screen.ManagerDashboard 
+                }
+            }
             BottomNavItem("Profile", Icons.Default.Person, false) {}
           }
         }
@@ -324,7 +348,8 @@ fun MainNavigationContent(
         onNavigateToDailySalesReport = onNavigateToDailySalesReport,
         onNavigateToAllModules = onNavigateToAllModules,
         onNavigateToDailyPumpData = onNavigateToDailyPumpData,
-        onNavigateToStaffManagement = { onScreenChange(Screen.StaffManagement) }
+        onNavigateToStaffManagement = { onScreenChange(Screen.StaffManagement) },
+        onNavigateToCashToBank = { onScreenChange(Screen.CashToBank) }
       )
     }
     Screen.ModuleSelection -> {
@@ -344,6 +369,7 @@ fun MainNavigationContent(
         NozzleSelectionScreen(
             username = loggedInUsername,
             adminPhone = loggedInAdminPhone,
+            userRole = userRole,
             onNavigateToCalculator = { nozzles, date, caName ->
                 onNozzleListChange(nozzles)
                 onDateChange(date)
@@ -394,9 +420,10 @@ fun MainNavigationContent(
         onNavigateToDailySalesReport = { onScreenChange(Screen.DailySalesReport) },
         onNavigateToTtEntryReport = { onScreenChange(Screen.TtEntryReport) },
         onNavigateToMonthlyExpensesReport = { onScreenChange(Screen.MonthlyExpensesReport) },
-        onNavigateToMonthlyCreditReport = { onScreenChange(Screen.MonthlyCreditReport) },
         onNavigateToMonthlyUdhariJamaReport = { onScreenChange(Screen.MonthlyUdhariJamaReport) },
         onNavigateToCustomerUdhariLedgerReport = { onScreenChange(Screen.CustomerUdhariLedgerReport) },
+        onNavigateToDensityHistory = { onScreenChange(Screen.DensityHistory) },
+        onNavigateToPriceHistory = { onScreenChange(Screen.PriceHistory) },
         onLogout = performLogout
       )
     }
@@ -415,9 +442,6 @@ fun MainNavigationContent(
     Screen.MonthlyExpensesReport -> {
         MonthlyExpensesReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
     }
-    Screen.MonthlyCreditReport -> {
-        MonthlyCreditReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
-    }
     Screen.MonthlyUdhariJamaReport -> {
         MonthlyUdhariJamaReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
     }
@@ -429,6 +453,15 @@ fun MainNavigationContent(
     }
     Screen.StaffManagement -> {
         StaffManagementScreen(adminPhone = loggedInAdminPhone, pumpName = loggedInPumpName, accountId = loggedInAccountId, onBack = { onScreenChange(Screen.Welcome) })
+    }
+    Screen.DensityHistory -> {
+        DensityHistoryScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.PriceHistory -> {
+        PriceHistoryScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.CashToBank -> {
+        CashToBankScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.Welcome) }, onLogout = performLogout)
     }
     else -> { /* Handle others if needed */ }
   }
@@ -444,7 +477,7 @@ fun EditDateDialog(isOpen: Boolean, currentDate: String, onDismiss: () -> Unit, 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Text(text = "Please verify or modify the active shift and reconciliation date.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(value = textState, onValueChange = { textState = it }, label = { Text("Date (dd-mm-yyyy)") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("dialog_date_input"))
+                VoiceOutlinedTextField(value = textState, onValueChange = { textState = it }, label = { Text("Date (dd-mm-yyyy)") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("dialog_date_input"))
             }
         },
         confirmButton = { Button(onClick = { onConfirm(textState.trim()) }, modifier = Modifier.testTag("dialog_date_confirm_button")) { Text("Confirm") } },

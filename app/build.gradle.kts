@@ -19,8 +19,8 @@ android {
     applicationId = "com.mypump.cal"
     minSdk = 24
     targetSdk = 36
-    versionCode = 11
-    versionName = "11.0"
+    versionCode = 13
+    versionName = "13.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -44,6 +44,7 @@ android {
     release {
       isCrunchPngs = false
       isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
@@ -72,14 +73,6 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  // Firebase (Removed for Supabase Migration)
-  // implementation(platform(libs.firebase.bom))
-  // implementation(libs.firebase.auth)
-  // implementation(libs.firebase.firestore)
-  // implementation(libs.firebase.appcheck)
-  // implementation(libs.firebase.appcheck.playintegrity)
-  // implementation(libs.firebase.appcheck.debug)
-  // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
   // implementation(libs.androidx.camera.core)

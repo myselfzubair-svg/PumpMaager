@@ -499,6 +499,8 @@ fun CalculatorScreen(
         }
     }
 
+    var ttEntries by remember { mutableStateOf<List<com.example.database.TtReceiptEntry>>(emptyList()) }
+
     // Dynamic testing and rate states (Map: Product Name -> Value)
     val testingValues = remember { mutableStateMapOf<String, String>() }
     val productRates = remember { mutableStateMapOf<String, Double>() }
@@ -507,16 +509,7 @@ fun CalculatorScreen(
     var phonePeValue by rememberSaveable { mutableStateOf("") }
     var cardsValue by rememberSaveable { mutableStateOf("") }
     var cashSubmittedValue by rememberSaveable { mutableStateOf("") }
-    
-    // Cash Denominations
-    var notes500 by rememberSaveable { mutableStateOf("") }
-    var notes200 by rememberSaveable { mutableStateOf("") }
-    var notes100 by rememberSaveable { mutableStateOf("") }
-    var notes50 by rememberSaveable { mutableStateOf("") }
-    var notes20 by rememberSaveable { mutableStateOf("") }
-    var notes10 by rememberSaveable { mutableStateOf("") }
-    var notes5 by rememberSaveable { mutableStateOf("") }
-    var coinsInput by rememberSaveable { mutableStateOf("") }
+    var actualCashValue by rememberSaveable { mutableStateOf("") }
     
     // Custom Udhari Jama
     var udhariJamaRawString by rememberSaveable { mutableStateOf("") }
@@ -532,6 +525,8 @@ fun CalculatorScreen(
     var kharchRawString by rememberSaveable { mutableStateOf("") }
     var tempKharchDesc by rememberSaveable { mutableStateOf("") }
     var tempKharchAmount by rememberSaveable { mutableStateOf("") }
+    var kharchDropdownExpanded by remember { mutableStateOf(false) }
+    val expenseOptions = listOf("Miscellaneous", "TankerEntry", "TeaWater", "ToiletClean", "Custom...")
 
     // Custom Credit (Udhar)
     var udharRawString by rememberSaveable { mutableStateOf("") }
@@ -603,6 +598,9 @@ fun CalculatorScreen(
                     testingValues[productName] = ""
                 }
             }
+            
+            // 2.5 Load TT Entries
+            ttEntries = com.example.database.SupabaseRepository.getTtEntriesByDate(adminPhone, date)
 
             // 3. Load Opening Readings (Observe history changes to fill accurately)
             launch {
@@ -625,7 +623,9 @@ fun CalculatorScreen(
                 }
             }
             
-            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+            val fetchedNames = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+            Log.d("CalculatorScreen", "Loaded ${fetchedNames.size} udhari names")
+            udhariNamesList = fetchedNames
         }
     }
 
@@ -772,17 +772,8 @@ fun CalculatorScreen(
     val cashSubmittedAmount = cashSubmittedValue.toDoubleOrNull() ?: 0.0
     val finalNetCash = grandTotal - phonePeAmount - cardsAmount - totalKharch - totalUdhar - cashSubmittedAmount
 
-    // Total Physical Cash Calculations
-    val count500 = notes500.toIntOrNull() ?: 0
-    val count200 = notes200.toIntOrNull() ?: 0
-    val count100 = notes100.toIntOrNull() ?: 0
-    val count50 = notes50.toIntOrNull() ?: 0
-    val count20 = notes20.toIntOrNull() ?: 0
-    val count10 = notes10.toIntOrNull() ?: 0
-    val count5 = notes5.toIntOrNull() ?: 0
-    val coinsAmt = coinsInput.toDoubleOrNull() ?: 0.0
-
-    val actualCashInHand = (count500 * 500) + (count200 * 200) + (count100 * 100) + (count50 * 50) + (count20 * 20) + (count10 * 10) + (count5 * 5) + coinsAmt
+    // Total Physical Cash (Balance)
+    val actualCashInHand = actualCashValue.toDoubleOrNull() ?: 0.0
 
     val missingRateProducts = nozzleReadings
         .groupBy { it.nozzleType }
@@ -820,33 +811,8 @@ fun CalculatorScreen(
         phonePeValue = ""
         cardsValue = ""
         cashSubmittedValue = ""
+        actualCashValue = ""
         udhariJamaRawString = ""
-        tempUdhariJamaName = ""
-        tempUdhariJamaReceiptNo = ""
-        tempUdhariJamaProduct = "MS"
-        tempUdhariJamaLitres = ""
-        tempUdhariJamaRate = ""
-        tempUdhariJamaDesc = ""
-        tempUdhariJamaAmount = ""
-        kharchRawString = ""
-        tempKharchDesc = ""
-        tempKharchAmount = ""
-        udharRawString = ""
-        tempUdharName = ""
-        tempUdharReceiptNo = ""
-        tempUdharProduct = "MS"
-        tempUdharLitres = ""
-        tempUdharRate = ""
-        tempUdharDesc = ""
-        tempUdharAmount = ""
-        notes500 = ""
-        notes200 = ""
-        notes100 = ""
-        notes50 = ""
-        notes20 = ""
-        notes10 = ""
-        notes5 = ""
-        coinsInput = ""
     }
 
     fun getSummaryText(): String {
@@ -886,7 +852,7 @@ fun CalculatorScreen(
         sb.append("  Grand Total: ₹${formatDouble(grandTotal)}\n")
         sb.append("-----------------------------\n")
         sb.append("  Expected Net Cash: ₹${formatDouble(finalNetCash)}\n")
-        sb.append("  Actual Cash in Hand: ₹${formatDouble(actualCashInHand)}\n")
+        sb.append("  CASH BALANCE: ₹${formatDouble(actualCashInHand)}\n")
         sb.append("  Discrepancy (Farak): ₹${formatDouble(cashDiscrepancy)}\n")
         sb.append("-----------------------------\n")
         
@@ -936,25 +902,11 @@ fun CalculatorScreen(
         }
         sb.append("-----------------------------\n")
         sb.append("EXPECTED NET CASH BAL: ₹${formatDouble(finalNetCash)}\n")
-        sb.append("ACTUAL CASH COLLECTED: ₹${formatDouble(actualCashInHand)}\n")
-
-        if (count500 > 0 || count200 > 0 || count100 > 0 || count50 > 0 || count20 > 0 || count10 > 0 || count5 > 0 || coinsAmt > 0) {
-            sb.append("CASH DENOMINATION BREAKDOWN:\n")
-            val denoms = mutableListOf<String>()
-            if (count500 > 0) denoms.add("  500x$count500=₹${count500 * 500}")
-            if (count200 > 0) denoms.add("  200x$count200=₹${count200 * 200}")
-            if (count100 > 0) denoms.add("  100x$count100=₹${count100 * 100}")
-            if (count50 > 0)  denoms.add("   50x$count50=₹${count50 * 50}")
-            if (count20 > 0)  denoms.add("   20x$count20=₹${count20 * 20}")
-            if (count10 > 0)  denoms.add("   10x$count10=₹${count10 * 10}")
-            if (count5 > 0)   denoms.add("    5x$count5=₹${count5 * 5}")
-            if (coinsAmt > 0) denoms.add("  Coins=₹${formatDouble(coinsAmt)}")
-            denoms.forEach { sb.append(it + "\n") }
-        }
+        sb.append("CASH BALANCE: ₹${formatDouble(actualCashInHand)}\n")
 
         sb.append("-----------------------------\n")
         when {
-            cashDiscrepancy == 0.0 -> sb.append("TALLY RESULT: SUCCESS (Perfect matching)\n")
+            Math.abs(cashDiscrepancy) < 1.0 -> sb.append("TALLY RESULT: SUCCESS (Perfect matching)\n")
             cashDiscrepancy < 0.0 -> sb.append("TALLY RESULT: SHORTAGE -₹${formatDouble(-cashDiscrepancy)}\n")
             cashDiscrepancy > 0.0 -> sb.append("TALLY RESULT: EXTRA CASH +₹${formatDouble(cashDiscrepancy)}\n")
         }
@@ -973,14 +925,37 @@ fun CalculatorScreen(
             val r = productRates[product]?.let { "₹$it" } ?: "N/A"
             val density = sharedPrefs.getString("density_${product.lowercase().replace(" ", "_")}_$date", "") ?: "N/A"
             val stock = sharedPrefs.getString("stock_${product.lowercase().replace(" ", "_")}_$date", "") ?: "N/A"
-            val receipt = sharedPrefs.getString("receipt_${product.lowercase().replace(" ", "_")}_$date", "") ?: "0.0"
+            
+            val isMs = isSameProduct(product, "MS") || isSameProduct(product, "Petrol")
+            val isHsd = isSameProduct(product, "HSD") || isSameProduct(product, "Diesel")
+            
+            val dbReceipt = if (isMs) {
+                ttEntries.sumOf { 
+                    if (it.msInvoiceQuantity > 0.0) it.msInvoiceQuantity 
+                    else (it.msPostDecantationStock - it.msPreDecantationStock).coerceAtLeast(0.0) 
+                }
+            } else if (isHsd) {
+                ttEntries.sumOf { 
+                    if (it.hsdInvoiceQuantity > 0.0) it.hsdInvoiceQuantity 
+                    else (it.hsdPostDecantationStock - it.hsdPreDecantationStock).coerceAtLeast(0.0)
+                }
+            } else {
+                ttEntries.sumOf { 
+                    if (it.extraProductName != null && isSameProduct(it.extraProductName, product)) it.extraInvoiceQuantity
+                    else 0.0
+                }
+            }
+            
+            val finalReceipt = if (dbReceipt > 0.0) dbReceipt.toString() 
+                               else sharedPrefs.getString("receipt_${product.lowercase().replace(" ", "_")}_$date", "0.0") ?: "0.0"
+
             """
             <tr>
                 <td><strong>$product</strong></td>
                 <td class="num">$r</td>
                 <td class="num">$density</td>
-                <td class="num">${if (stock != "N/A") "$stock L" else "N/A"}</td>
-                <td class="num">${if (receipt != "0.0") "$receipt L" else "0.0 L"}</td>
+                <td class="num">${if (stock != "N/A" && stock != "") "$stock L" else "N/A"}</td>
+                <td class="num">${if (finalReceipt != "0.0" && finalReceipt != "") "$finalReceipt L" else "0.0 L"}</td>
             </tr>
             """.trimIndent()
         }.joinToString("")
@@ -1035,7 +1010,8 @@ fun CalculatorScreen(
                 } else {
                     "${item.product} | ${formatDouble(item.litres)} Ltrs @ ₹${formatDouble(item.rate)}" + (if (item.receiptNo.isNotBlank()) " | Rec. No. ${item.receiptNo}" else "")
                 }
-                "<tr><td>+ Rec: <b>${item.name}</b> ($details)<br/><span style='font-size: 0.85em; color: #555;'>${item.description}</span></td><td class='num'>₹${formatDouble(item.amount)}</td></tr>"
+                val descLine = if (item.description.isNotBlank()) "<br/><span style='font-size: 0.85em; color: #555;'>Desc: ${item.description}</span>" else ""
+                "<tr><td>+ Rec: <b>${item.name}</b> ($details)$descLine</td><td class='num'>₹${formatDouble(item.amount)}</td></tr>"
             }
         }
 
@@ -1043,7 +1019,7 @@ fun CalculatorScreen(
             "<tr><td colspan='2' style='text-align: center; color: #a0aec0;'>No expense entries recorded</td></tr>"
         } else {
             kharchList.sortedBy { it.first.lowercase() }.joinToString("") { (desc, amt) ->
-                "<tr><td>- Exp: $desc</td><td class='num'>-₹${formatDouble(amt)}</td></tr>"
+                "<tr><td>- Exp: <b>$desc</b></td><td class='num'>-₹${formatDouble(amt)}</td></tr>"
             }
         }
 
@@ -1056,27 +1032,12 @@ fun CalculatorScreen(
                 } else {
                     "${item.product} | ${formatDouble(item.litres)} Ltrs @ ₹${formatDouble(item.rate)}" + (if (item.receiptNo.isNotBlank()) " | Rec. No. ${item.receiptNo}" else "")
                 }
-                "<tr><td>- Crd: <b>${item.name}</b> ($details)<br/><span style='font-size: 0.85em; color: #555;'>${item.description}</span></td><td class='num'>-₹${formatDouble(item.amount)}</td></tr>"
+                val descLine = if (item.description.isNotBlank()) "<br/><span style='font-size: 0.85em; color: #555;'>Desc: ${item.description}</span>" else ""
+                "<tr><td>- Crd: <b>${item.name}</b> ($details)$descLine</td><td class='num'>-₹${formatDouble(item.amount)}</td></tr>"
             }
         }
 
-        val denomsList = mutableListOf<Pair<String, Double>>()
-        if (count500 > 0) denomsList.add(Pair("500 x $count500", (count500 * 500).toDouble()))
-        if (count200 > 0) denomsList.add(Pair("200 x $count200", (count200 * 200).toDouble()))
-        if (count100 > 0) denomsList.add(Pair("100 x $count100", (count100 * 100).toDouble()))
-        if (count50 > 0)  denomsList.add(Pair("50 x $count50", (count50 * 50).toDouble()))
-        if (count20 > 0)  denomsList.add(Pair("20 x $count20", (count20 * 20).toDouble()))
-        if (count10 > 0)  denomsList.add(Pair("10 x $count10", (count10 * 10).toDouble()))
-        if (count5 > 0)   denomsList.add(Pair("5 x $count5", (count5 * 5).toDouble()))
-        if (coinsAmt > 0) denomsList.add(Pair("Coins", coinsAmt))
 
-        val denomsHtml = if (denomsList.isEmpty()) {
-            "<tr><td colspan='2' style='text-align: center; color: #a0aec0;'>No cash breakdown entered</td></tr>"
-        } else {
-            denomsList.joinToString("") { (label, value) ->
-                "<tr><td>$label</td><td class='num'>₹${formatDouble(value)}</td></tr>"
-            }
-        }
 
         val tallyClass = when {
             cashDiscrepancy == 0.0 -> "green-bg"
@@ -1106,8 +1067,8 @@ fun CalculatorScreen(
                         color: #2d3748;
                         margin: 0;
                         padding: 0;
-                        font-size: 9px;
-                        line-height: 1.25;
+                        font-size: 11px;
+                        line-height: 1.3;
                         background-color: #fff;
                     }
                     .header-title-box {
@@ -1117,7 +1078,7 @@ fun CalculatorScreen(
                         margin-bottom: 8px;
                     }
                     .header-title-box h1 {
-                        font-size: 14px;
+                        font-size: 16px;
                         margin: 0;
                         color: #1a365d;
                         text-transform: uppercase;
@@ -1125,7 +1086,7 @@ fun CalculatorScreen(
                         font-weight: 800;
                     }
                     .header-sub {
-                        font-size: 9px;
+                        font-size: 11px;
                         font-weight: bold;
                         color: #4a5568;
                         margin: 2px 0 0 0;
@@ -1155,7 +1116,7 @@ fun CalculatorScreen(
                         page-break-inside: avoid;
                     }
                     .card-caption {
-                        font-size: 8.5px;
+                        font-size: 10.5px;
                         font-weight: 800;
                         color: #2b6cb0;
                         border-bottom: 1.2px solid #2b6cb0;
@@ -1167,7 +1128,7 @@ fun CalculatorScreen(
                     table {
                         width: 100%;
                         border-collapse: collapse;
-                        font-size: 8.2px;
+                        font-size: 10px;
                     }
                     th {
                         background-color: #ebf8ff;
@@ -1177,7 +1138,7 @@ fun CalculatorScreen(
                         text-align: left;
                         padding: 3px 4px;
                         text-transform: uppercase;
-                        font-size: 7.5px;
+                        font-size: 9.5px;
                     }
                     td {
                         border-bottom: 1px dashed #e2e8f0;
@@ -1300,20 +1261,21 @@ fun CalculatorScreen(
                             </table>
                         </div>
 
-                        <!-- CASH DENOMINATION BREAKDOWN -->
+                        <!-- CASH TALLY SUMMARY -->
                         <div class="card">
-                            <div class="card-caption">CASH DENOMINATION DETAIL</div>
+                            <div class="card-caption">FINAL CASH TALLY SUMMARY</div>
                             <table>
-                                <thead>
-                                    <tr>
-                                        <th>Denomination</th>
-                                        <th class="num">Amount (₹)</th>
-                                    </tr>
-                                </thead>
                                 <tbody>
-                                    $denomsHtml
+                                    <tr>
+                                        <td>Total Revenue Expected</td>
+                                        <td class="num">₹${formatDouble(grandTotal)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Cash Submitted</td>
+                                        <td class="num">-₹${formatDouble(cashSubmittedAmount)}</td>
+                                    </tr>
                                     <tr class="bold-total">
-                                        <td>TOTAL CASH FROM BREAKDOWN</td>
+                                        <td>TOTAL CASH BALANCE</td>
                                         <td class="num">₹${formatDouble(actualCashInHand)}</td>
                                     </tr>
                                 </tbody>
@@ -1346,26 +1308,12 @@ fun CalculatorScreen(
                                         <td class="num">₹${formatDouble(grandTotal)}</td>
                                     </tr>
                                     <tr>
-                                        <td>PhonePe Transaction Deduction</td>
-                                        <td class="num">-₹${formatDouble(phonePeAmount)}</td>
+                                        <td>Total accounted PhonePe/Cards/Expenses/Udhar</td>
+                                        <td class="num">-₹${formatDouble(phonePeAmount + cardsAmount + totalKharch + totalUdhar)}</td>
                                     </tr>
-                                    <tr>
-                                        <td>Cards / Swipe Deduction</td>
-                                        <td class="num">-₹${formatDouble(cardsAmount)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>Direct Bank Deposit / Cash Submitted</td>
-                                        <td class="num">-₹${formatDouble(cashSubmittedAmount)}</td>
-                                    </tr>
-                                    $tableKharchHtml
-                                    $tableUdharHtml
                                     <tr class="bold-total">
-                                        <td>EXPECTED CASH BALANCE TO BE REMITTED</td>
-                                        <td class="num">₹${formatDouble(finalNetCash)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>ACTUAL CASH IN HAND (REMITTED)</td>
-                                        <td class="num">₹${formatDouble(actualCashInHand)}</td>
+                                        <td>REMAINING NET CASH TARGET</td>
+                                        <td class="num">₹${formatDouble(finalNetCash + cashSubmittedAmount)}</td>
                                     </tr>
                                     <tr class="$tallyClass">
                                         <td class="bold">TALLY STATUS / DISCREPANCY</td>
@@ -1467,7 +1415,7 @@ fun CalculatorScreen(
             ) {
                 Row(
                     modifier = Modifier
-                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1776,7 +1724,7 @@ fun CalculatorScreen(
                                 onDismissRequest = { showAddUdhariDialog = false },
                                 title = { Text("Add New Udhari Name") },
                                 text = {
-                                    OutlinedTextField(
+                                    VoiceOutlinedTextField(
                                         value = newUdhariNameInput,
                                         onValueChange = { newUdhariNameInput = it },
                                         label = { Text("Udhari Name") },
@@ -1789,12 +1737,10 @@ fun CalculatorScreen(
                                         onClick = {
                                             val name = newUdhariNameInput.trim()
                                             if (name.isNotEmpty()) {
-                                                if (!udhariNamesList.contains(name)) {
-                                                    val newList = (udhariNamesList + name).distinct().sorted()
-                                                    udhariNamesList = newList
-                                                    coroutineScope.launch {
-                                                        com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, newList)
-                                                    }
+                                                coroutineScope.launch {
+                                                    com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, listOf(name))
+                                                    // Immediately refresh local list
+                                                    udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
                                                 }
                                                 tempUdhariJamaName = name
                                                 newUdhariNameInput = ""
@@ -1815,7 +1761,7 @@ fun CalculatorScreen(
                         }
 
                         Box(modifier = Modifier.fillMaxWidth()) {
-                            OutlinedTextField(
+                            VoiceOutlinedTextField(
                                 value = tempUdhariJamaName.ifEmpty { "Select Udhari" },
                                 onValueChange = {},
                                 readOnly = true,
@@ -1827,7 +1773,12 @@ fun CalculatorScreen(
                                     .testTag("four_nozzle_udhari_jama_name_input"),
                                 textStyle = MaterialTheme.typography.bodyMedium,
                                 trailingIcon = {
-                                    IconButton(onClick = { udhariDropdownExpanded = true }) {
+                                    IconButton(onClick = { 
+                                        udhariDropdownExpanded = true 
+                                        coroutineScope.launch {
+                                            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+                                        }
+                                    }) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowDropDown,
                                             contentDescription = "Select Udhari Name"
@@ -1846,7 +1797,12 @@ fun CalculatorScreen(
                             Box(
                                 modifier = Modifier
                                     .matchParentSize()
-                                    .clickable { udhariDropdownExpanded = true }
+                                    .clickable { 
+                                        udhariDropdownExpanded = true 
+                                        coroutineScope.launch {
+                                            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+                                        }
+                                    }
                             )
 
                             DropdownMenu(
@@ -1877,11 +1833,15 @@ fun CalculatorScreen(
                     }
 
                     if (tempUdhariJamaName.isNotBlank() && tempUdhariJamaName != "Miscellaneous") {
+                        val sessionJama = udhariJamaList.filter { it.name == tempUdhariJamaName }.sumOf { it.amount }
+                        val sessionUdhar = udharList.filter { it.name == tempUdhariJamaName }.sumOf { it.amount }
+                        val netBalance = jamaPartyBalance + sessionUdhar - sessionJama
+                        
                         Text(
-                            text = "Outstanding Balance: ₹ ${formatDouble(jamaPartyBalance)}",
+                            text = "Outstanding Balance: ₹ ${formatDouble(netBalance)}",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (jamaPartyBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
+                                color = if (netBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
                             ),
                             modifier = Modifier.padding(horizontal = 8.dp)
                         )
@@ -2275,48 +2235,6 @@ fun CalculatorScreen(
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f))
 
-                    // Cash Submitted input row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp))
-                            .border(
-                                BorderStroke(1.dp, Color(0xFF1A1A1A).copy(alpha = 0.3f)),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Cash Submitted",
-                                tint = Color(0xFF1A1A1A),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = LanguageManager.translate("Cash Submitted (₹)", "जमा किया गया नकद (₹)"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF1A1A1A)
-                            )
-                        }
-                        
-                        FourNozzleDensityInputField(
-                            value = cashSubmittedValue,
-                            onValueChange = { cashSubmittedValue = sanitizeInput(it) },
-                            placeholder = "₹ 0",
-                            modifier = Modifier
-                                .width(120.dp)
-                                .testTag("four_nozzle_cash_submitted_input")
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f))
-
                     // Daily Expenses (Kharch) Row Integration
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2362,24 +2280,80 @@ fun CalculatorScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        VoiceOutlinedTextField(
-                            value = tempKharchDesc,
-                            onValueChange = { tempKharchDesc = it },
-                            placeholder = { Text("Details (e.g., Tea, Staff)", fontSize = 12.sp) },
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1.5f)
-                                .height(50.dp)
-                                .testTag("four_nozzle_kharch_desc_input"),
-                            textStyle = MaterialTheme.typography.bodyMedium,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF2D2D2D),
-                                unfocusedBorderColor = Color(0xFF2D2D2D).copy(alpha = 0.3f),
-                                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        )
+                        Box(modifier = Modifier.weight(1.5f)) {
+                            VoiceOutlinedTextField(
+                                value = tempKharchDesc.ifEmpty { "Select Category" },
+                                onValueChange = {},
+                                readOnly = true,
+                                placeholder = { Text("Category", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .testTag("four_nozzle_kharch_desc_input"),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                trailingIcon = {
+                                    IconButton(onClick = { kharchDropdownExpanded = true }) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = "Select Expense Category"
+                                        )
+                                    }
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFF2D2D2D),
+                                    unfocusedBorderColor = Color(0xFF2D2D2D).copy(alpha = 0.3f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { kharchDropdownExpanded = true }
+                            )
+
+                            DropdownMenu(
+                                expanded = kharchDropdownExpanded,
+                                onDismissRequest = { kharchDropdownExpanded = false }
+                            ) {
+                                expenseOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option) },
+                                        onClick = {
+                                            if (option == "Custom...") {
+                                                tempKharchDesc = ""
+                                            } else {
+                                                tempKharchDesc = option
+                                            }
+                                            kharchDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (tempKharchDesc.isEmpty() || tempKharchDesc !in expenseOptions.filter { it != "Custom..." }) {
+                             VoiceOutlinedTextField(
+                                value = tempKharchDesc,
+                                onValueChange = { tempKharchDesc = it },
+                                placeholder = { Text("Custom Details", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(50.dp),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFF2D2D2D),
+                                    unfocusedBorderColor = Color(0xFF2D2D2D).copy(alpha = 0.3f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                        }
 
                         VoiceOutlinedTextField(
                             value = tempKharchAmount,
@@ -2553,7 +2527,7 @@ fun CalculatorScreen(
                                 onDismissRequest = { showAddUdharNameDialog = false },
                                 title = { Text("Add New Udhari Name") },
                                 text = {
-                                    OutlinedTextField(
+                                    VoiceOutlinedTextField(
                                         value = newUdharNameInput,
                                         onValueChange = { newUdharNameInput = it },
                                         label = { Text("Udhari Name") },
@@ -2566,12 +2540,10 @@ fun CalculatorScreen(
                                         onClick = {
                                             val name = newUdharNameInput.trim()
                                             if (name.isNotEmpty()) {
-                                                if (!udhariNamesList.contains(name)) {
-                                                    val newList = (udhariNamesList + name).distinct().sorted()
-                                                    udhariNamesList = newList
-                                                    coroutineScope.launch {
-                                                        com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, newList)
-                                                    }
+                                                coroutineScope.launch {
+                                                    com.example.database.SupabaseRepository.saveUdhariNames(adminPhone, listOf(name))
+                                                    // Immediately refresh local list
+                                                    udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
                                                 }
                                                 tempUdharName = name
                                                 newUdharNameInput = ""
@@ -2592,7 +2564,7 @@ fun CalculatorScreen(
                         }
 
                         Box(modifier = Modifier.weight(1.2f)) {
-                            OutlinedTextField(
+                            VoiceOutlinedTextField(
                                 value = tempUdharName.ifEmpty { "Select Udhari" },
                                 onValueChange = {},
                                 readOnly = true,
@@ -2604,7 +2576,12 @@ fun CalculatorScreen(
                                     .testTag("four_nozzle_udhar_name_input"),
                                 textStyle = MaterialTheme.typography.bodyMedium,
                                 trailingIcon = {
-                                    IconButton(onClick = { udharNameDropdownExpanded = true }) {
+                                    IconButton(onClick = { 
+                                        udharNameDropdownExpanded = true 
+                                        coroutineScope.launch {
+                                            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+                                        }
+                                    }) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowDropDown,
                                             contentDescription = "Select Udhari Name"
@@ -2623,7 +2600,12 @@ fun CalculatorScreen(
                             Box(
                                 modifier = Modifier
                                     .matchParentSize()
-                                    .clickable { udharNameDropdownExpanded = true }
+                                    .clickable { 
+                                        udharNameDropdownExpanded = true 
+                                        coroutineScope.launch {
+                                            udhariNamesList = com.example.database.SupabaseRepository.getUdhariNames(adminPhone)
+                                        }
+                                    }
                             )
 
                             DropdownMenu(
@@ -2674,11 +2656,15 @@ fun CalculatorScreen(
                     }
 
                     if (tempUdharName.isNotBlank() && tempUdharName != "Miscellaneous") {
+                        val sessionJama = udhariJamaList.filter { it.name == tempUdharName }.sumOf { it.amount }
+                        val sessionUdhar = udharList.filter { it.name == tempUdharName }.sumOf { it.amount }
+                        val netBalance = udharPartyBalance + sessionUdhar - sessionJama
+
                         Text(
-                            text = "Outstanding Balance: ₹ ${formatDouble(udharPartyBalance)}",
+                            text = "Outstanding Balance: ₹ ${formatDouble(netBalance)}",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (udharPartyBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
+                                color = if (netBalance > 0) Color(0xFFB91C1C) else Color(0xFF15803D)
                             ),
                             modifier = Modifier.padding(horizontal = 8.dp)
                         )
@@ -2693,7 +2679,7 @@ fun CalculatorScreen(
                         var productDropdownExpanded by remember { mutableStateOf(false) }
 
                         Box(modifier = Modifier.weight(1.2f)) {
-                            OutlinedTextField(
+                            VoiceOutlinedTextField(
                                 value = tempUdharProduct.ifEmpty { "Select Product" },
                                 onValueChange = {},
                                 readOnly = true,
@@ -2993,275 +2979,90 @@ fun CalculatorScreen(
                 }
             }
 
-            // PHYSICAL CASH COUNTER & TALLY SHEET
+            // FINAL TALLY & CASH POSITION
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                 ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Text(
-                        text = "PHYSICAL CASH COUNTER & TALLY",
+                        text = "FINAL SHIFT TALLY",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
 
-                    // Reconciliation summary of flows
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Base Net Cash Balance", style = MaterialTheme.typography.bodyMedium)
-                            Text("₹ " + formatDouble(finalNetCash), style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
+                        // Expected Row
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Expected Net Cash Balance", style = MaterialTheme.typography.bodyMedium)
+                            Text("₹ ${formatDouble(finalNetCash + cashSubmittedAmount)}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                         }
-                    }
 
-                    // Currency Notes Inputs Matrix
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp))
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            text = "Physical Currency Count (Denominations)",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        HorizontalDivider(thickness = 0.5.dp)
 
-                        val denoFieldsList = listOf(
-                            Triple("₹ 500 notes", notes500, { v: String -> notes500 = sanitizeInteger(v) }),
-                            Triple("₹ 200 notes", notes200, { v: String -> notes200 = sanitizeInteger(v) }),
-                            Triple("₹ 100 notes", notes100, { v: String -> notes100 = sanitizeInteger(v) }),
-                            Triple("₹ 50 notes", notes50, { v: String -> notes50 = sanitizeInteger(v) }),
-                            Triple("₹ 20 notes", notes20, { v: String -> notes20 = sanitizeInteger(v) }),
-                            Triple("₹ 10 notes", notes10, { v: String -> notes10 = sanitizeInteger(v) }),
-                            Triple("₹ 5 notes", notes5, { v: String -> notes5 = sanitizeInteger(v) })
-                        )
-
-                        denoFieldsList.forEach { (label, valueState, onValChange) ->
-                            val multiplier = label.replace("₹ ", "").replace(" notes", "").toIntOrNull() ?: 0
-                            val count = valueState.toIntOrNull() ?: 0
-                            val rowTotal = count * multiplier
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "₹ $multiplier",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    modifier = Modifier.width(55.dp)
-                                )
-                                Text(
-                                    text = "x",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(horizontal = 4.dp)
-                                )
-                                OutlinedTextField(
-                                    value = valueState,
-                                    onValueChange = onValChange,
-                                    placeholder = { Text("0", fontSize = 12.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = Color.Transparent,
-                                        unfocusedContainerColor = Color.Transparent,
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                    ),
-                                    modifier = Modifier
-                                        .width(90.dp)
-                                        .height(48.dp)
-                                        .testTag("four_nozzle_deno_${multiplier}"),
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        textAlign = TextAlign.Center
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                Text(
-                                    text = " = ₹ ${formatDouble(rowTotal.toDouble())}",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.End
-                                )
+                        // Cash Submitted Row
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.Upload, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                Text("Cash Submitted (₹)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                             }
-                        }
-
-                        // Coins & Misc Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Coins/Misc",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.width(65.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            OutlinedTextField(
-                                value = coinsInput,
-                                onValueChange = { coinsInput = sanitizeInput(it) },
-                                placeholder = { Text("0", fontSize = 12.sp) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier
-                                    .width(90.dp)
-                                    .height(48.dp)
-                                    .testTag("four_nozzle_deno_coins"),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    textAlign = TextAlign.Center
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            Text(
-                                text = " = ₹ ${formatDouble(coinsAmt)}",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.End
-                            )
-                        }
-                    }
-
-                    // Real-time Actual vs Expected and shortage/over check
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = when {
-                                    cashDiscrepancy == 0.0 -> Color(0xFFFAFAFA)
-                                    cashDiscrepancy < 0.0 -> Color(0xFFFAFAFA)
-                                    else -> Color(0xFFFAFAFA)
-                                },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = when {
-                                    cashDiscrepancy == 0.0 -> Color(0xFFD3D3D3)
-                                    cashDiscrepancy < 0.0 -> Color(0xFFD3D3D3)
-                                    else -> Color(0xFFD3D3D3)
-                                },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Actual Cash Collected:",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "₹ " + formatDouble(actualCashInHand),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black
-                                )
+                            FourNozzleDensityInputField(
+                                value = cashSubmittedValue,
+                                onValueChange = { cashSubmittedValue = sanitizeInput(it) },
+                                placeholder = "₹ 0",
+                                modifier = Modifier.width(130.dp)
                             )
                         }
 
-                        if (cashSubmittedAmount > 0.0) {
-                            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Cash Submitted:",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                    color = Color.Black
-                                )
-                                Text(
-                                    text = "₹ " + formatDouble(cashSubmittedAmount),
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.Black
-                                    )
-                                )
+                        // Cash Balance Row
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.AccountBalanceWallet, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                Text("CASH BALANCE (₹)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                             }
+                            FourNozzleDensityInputField(
+                                value = actualCashValue,
+                                onValueChange = { actualCashValue = sanitizeInput(it) },
+                                placeholder = "₹ 0",
+                                modifier = Modifier.width(130.dp)
+                            )
                         }
 
-                        HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Tally Difference:",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.Black
-                            )
+                        // Tally Row
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Tally Difference", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                            
                             val diffText = when {
-                                cashDiscrepancy == 0.0 -> "₹ 0 (Perfect Match)"
-                                cashDiscrepancy < 0.0 -> "- ₹ " + formatDouble(-cashDiscrepancy) + " [Shortage]"
-                                else -> "+ ₹ " + formatDouble(cashDiscrepancy) + " [Surplus]"
+                                Math.abs(cashDiscrepancy) < 1.0 -> "₹ 0 (Perfect)"
+                                cashDiscrepancy < 0.0 -> "- ₹ ${formatDouble(-cashDiscrepancy)} [Short]"
+                                else -> "+ ₹ ${formatDouble(cashDiscrepancy)} [Extra]"
                             }
                             
-                            // Dynamic font size calculation to prevent overflowing
-                            val baseFontSize = 15.sp
-                            val dynamicFontSize = when {
-                                diffText.length > 30 -> 10.sp
-                                diffText.length > 25 -> 11.sp
-                                diffText.length > 20 -> 12.sp
-                                diffText.length > 15 -> 13.sp
-                                else -> baseFontSize
-                            }
-
                             Text(
                                 text = diffText,
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = dynamicFontSize,
                                     color = when {
-                                        cashDiscrepancy == 0.0 -> Color(0xFF15803D) // green-700
-                                        cashDiscrepancy < 0.0 -> Color(0xFFB91C1C) // red-700
-                                        else -> Color(0xFFC2410C) // orange-700
+                                        Math.abs(cashDiscrepancy) < 1.0 -> Color(0xFF15803D)
+                                        cashDiscrepancy < 0.0 -> Color(0xFFB91C1C)
+                                        else -> Color(0xFFC2410C)
                                     }
-                                ),
-                                maxLines = 1
+                                )
                             )
                         }
                     }
@@ -3303,7 +3104,7 @@ fun CalculatorScreen(
                                 val htmlReport = generateA4HtmlReport()
                                 
                                 val effectiveMeterNo = if (meterNo.isBlank()) {
-                                    selectedNozzles.map { it.nozzleNumber }.distinct().sorted().joinToString(", ")
+                                    selectedNozzles.map { it.nozzleNumber }.distinct().sortedBy { extractNozzleNumber(it) }.joinToString(", ")
                                 } else meterNo
 
                                 // 1. Save Main Audit Record
@@ -3329,6 +3130,12 @@ fun CalculatorScreen(
                                     tallyDifference = cashDiscrepancy
                                 )
                                 com.example.database.SupabaseRepository.saveAudit(audit)
+
+                                // Allow Supabase to index the inserted row to avoid race condition
+                                kotlinx.coroutines.delay(1000)
+
+                                // Update Manager's Daily Cash Ledger: Save TOTAL CASH (Submitted + Balance)
+                                com.example.database.SupabaseRepository.upsertDailyCash(adminPhone, date, cashSubmittedAmount + actualCashInHand)
 
                                 // Sync Udhari Names
                                 val namesInJama = udhariJamaList.map { it.name }

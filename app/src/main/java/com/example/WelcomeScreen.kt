@@ -31,6 +31,7 @@ import com.example.database.SavedAudit
 import com.example.database.DailyPumpData
 import com.example.database.SupabaseRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
@@ -56,7 +57,8 @@ fun WelcomeScreen(
     onNavigateToAllModules: () -> Unit = {},
     onNavigateToDailyPumpData: () -> Unit = {},
     onNavigateToAdminPanel: () -> Unit = {},
-    onNavigateToStaffManagement: () -> Unit = {}
+    onNavigateToStaffManagement: () -> Unit = {},
+    onNavigateToCashToBank: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -71,12 +73,30 @@ fun WelcomeScreen(
     }
 
     var dailyPumpDataList by remember { mutableStateOf<List<DailyPumpData>>(emptyList()) }
+    var bankableCash by remember { mutableStateOf(0.0) }
 
     LaunchedEffect(adminPhone, todayDate) {
         coroutineScope.launch(Dispatchers.IO) {
             val data = SupabaseRepository.getDailyPumpData(adminPhone, todayDate)
+            
+            // Calculate bankable cash
+            val audits = SupabaseRepository.getAuditsFlow(adminPhone).first()
+            val managerTransactions = SupabaseRepository.getManagerTransactionsFlow(adminPhone).first()
+            val latestDeposit = managerTransactions.firstOrNull { it.type == "BANK_DEPOSIT" }
+            val cycleStart = latestDeposit?.timestamp ?: 0L
+            
+            val currentAudits = audits.filter { it.timestamp > cycleStart }
+            val currentMGR = managerTransactions.filter { it.timestamp > cycleStart }
+            
+            val inflow = currentAudits.sumOf { it.totalFuelSalesAmount + it.totalUdhariJama } + 
+                         currentMGR.filter { it.type == "MANAGER_JAMA" }.sumOf { it.amount }
+            
+            val outflow = currentAudits.sumOf { it.phonePeAmount + it.cardsAmount + it.totalKharch + it.totalUdhar } + 
+                          currentMGR.filter { it.type != "MANAGER_JAMA" && it.type != "BANK_DEPOSIT" }.sumOf { it.amount }
+            
             withContext(Dispatchers.Main) {
                 dailyPumpDataList = data
+                bankableCash = (inflow - outflow).coerceAtLeast(0.0)
             }
         }
     }
@@ -220,7 +240,7 @@ fun WelcomeScreen(
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Today's Setup Overview", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1E293B)))
-                        if (isEditable) {
+                        if (isEditable && userRoleFromSession.uppercase() != "CA") {
                             Text("View All", color = Color(0xFF2563EB), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.clickable { onNavigateToAllModules() })
                         }
                     }
@@ -254,11 +274,15 @@ fun WelcomeScreen(
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Quick Access", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1E293B)))
-                    Text("View All", color = Color(0xFF2563EB), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.clickable { onNavigateToAllModules() })
+                    if (userRoleFromSession.uppercase() != "CA") {
+                        Text("View All", color = Color(0xFF2563EB), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.clickable { onNavigateToAllModules() })
+                    }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    val isAdmin = userRoleFromSession == "ADMIN" || loggedInMobileNumber.isEmpty()
-                    val isManagerOrAdmin = userRoleFromSession == "ADMIN" || userRoleFromSession == "MANAGER" || loggedInMobileNumber.isEmpty()
+                    val role = userRoleFromSession.uppercase()
+                    val isAdmin = role == "ADMIN" || loggedInMobileNumber.isEmpty()
+                    val isManager = role == "MANAGER"
+                    val isManagerOrAdmin = isAdmin || isManager
 
                     DashboardQuickAction("CA Module", Icons.Default.LocalGasStation, Color(0xFF2563EB), { onNavigateToCalculator() })
                     
@@ -268,10 +292,17 @@ fun WelcomeScreen(
                     
                     if (isManagerOrAdmin) {
                         DashboardQuickAction("Daily Sales", Icons.Default.Assessment, Color(0xFF10B981), { onNavigateToDailySalesReport() })
-                        DashboardQuickAction("Saved Reports", Icons.Default.Folder, Color(0xFF8B5CF6), { onNavigateToHistory() })
+                        DashboardQuickAction("Bankable: ₹${formatDouble(bankableCash)}", Icons.Default.AccountBalance, Color(0xFFF59E0B), { onNavigateToCashToBank() })
+                        
+                        // MANAGER cannot see Saved Reports
+                        if (isAdmin) {
+                            DashboardQuickAction("Saved Reports", Icons.Default.Folder, Color(0xFF8B5CF6), { onNavigateToHistory() })
+                        }
                     }
                     
-                    DashboardQuickAction("Reports", Icons.Default.PieChart, Color(0xFF64748B), { onNavigateToReports() })
+                    if (isManagerOrAdmin) {
+                        DashboardQuickAction("Reports", Icons.Default.PieChart, Color(0xFF64748B), { onNavigateToReports() })
+                    }
                 }
             }
 

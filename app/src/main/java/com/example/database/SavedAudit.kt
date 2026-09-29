@@ -26,5 +26,18 @@ data class SavedAudit(
     @SerialName("phone_pe_amount") val phonePeAmount: Double = 0.0,
     @SerialName("cards_amount") val cardsAmount: Double = 0.0,
     @SerialName("expected_cash_balance") val expectedCashBalance: Double = 0.0,
-    @SerialName("tally_difference") val tallyDifference: Double = 0.0
+    @SerialName("tally_difference") val tallyDifference: Double = 0.0,
+
+    // Manager's Reconciliation Fields
+    @SerialName("is_settled") val isSettled: Boolean = false,
+    @SerialName("opening_balance") val openingBalance: Double = 0.0,
+    @SerialName("manual_difference") val manualDifference: Double = 0.0,
+    @SerialName("reconciled_in_manager_report_id") val reconciledInManagerReportId: String? = null,
+
+    // Metadata snapshot for historical calculation accuracy
+    @SerialName("last_settled_report_date") val lastSettledReportDate: String? = null,
+    @SerialName("daily_cash_details") val dailyCashDetails: String? = null,
+    @SerialName("cash_available_to_deposit") val cashAvailableToDeposit: Double = 0.0,
+    @SerialName("actual_deposited_amount") val actualDepositedAmount: Double = 0.0,
+    @SerialName("opening_balance_used") val openingBalanceUsed: Double = 0.0
 )

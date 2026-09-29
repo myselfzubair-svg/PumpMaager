@@ -26,5 +26,22 @@ data class TtReceiptEntry(
     @SerialName("hsd_post_decantation_stock") val hsdPostDecantationStock: Double = 0.0,
     @SerialName("ms_shortage") val msShortage: Double = 0.0,
     @SerialName("hsd_shortage") val hsdShortage: Double = 0.0,
+
+    @SerialName("ms_invoice_quantity") val msInvoiceQuantity: Double = 0.0,
+    @SerialName("hsd_invoice_quantity") val hsdInvoiceQuantity: Double = 0.0,
+    
+    @SerialName("extra_product_name") val extraProductName: String? = null,
+    @SerialName("extra_invoice_quantity") val extraInvoiceQuantity: Double = 0.0,
+    @SerialName("extra_invoice_amount") val extraInvoiceAmount: Double = 0.0,
+    @SerialName("extra_invoice_density") val extraInvoiceDensity: Double = 0.0,
+    @SerialName("extra_actual_density") val extraActualDensity: Double = 0.0,
+    @SerialName("extra_pre_decantation_stock") val extraPreDecantationStock: Double = 0.0,
+    @SerialName("extra_post_decantation_stock") val extraPostDecantationStock: Double = 0.0,
+    @SerialName("extra_shortage") val extraShortage: Double = 0.0,
+
+    @SerialName("ms_density_diff") val msDensityDiff: Double = 0.0,
+    @SerialName("hsd_density_diff") val hsdDensityDiff: Double = 0.0,
+    @SerialName("extra_density_diff") val extraDensityDiff: Double = 0.0,
+
     val timestamp: Long = System.currentTimeMillis()
 )

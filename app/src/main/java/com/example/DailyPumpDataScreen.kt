@@ -275,7 +275,7 @@ fun DailyDataSection(
             }
 
             products.forEach { product ->
-                OutlinedTextField(
+                VoiceOutlinedTextField(
                     value = inputs[product] ?: "",
                     onValueChange = { inputs[product] = it },
                     label = { Text("$product $labelSuffix") },

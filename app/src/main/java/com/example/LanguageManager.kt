@@ -38,6 +38,7 @@ object LanguageManager {
     // CA Module Config Workflow
     val caConfigTitle get() = translate("CA Module Configuration", "CA मॉड्यूल कॉन्फ़िगरेशन")
     val stepCaName get() = translate("Step 1: CA Name", "चरण 1: सीए (CA) नाम")
+    val selectCaName get() = translate("Select CA Name", "सीए (CA) नाम चुनें")
     val caNameAutoFilled get() = translate("(Auto-filled)", "(स्वचालित रूप से भरा गया)")
     val stepSelectDate get() = translate("Step 2: Select Date", "चरण 2: तारीख चुनें")
     val calculationDate get() = translate("Calculation Date", "कैलकुलेशन की तारीख")
@@ -88,7 +89,7 @@ object LanguageManager {
     
     // Audit Status/Results
     val expectedNetCash get() = translate("Expected Net Cash", "अपेक्षित शुद्ध नकद")
-    val actualCashInHand get() = translate("Actual Cash in Hand", "हाथ में उपलब्ध नकद")
+    val actualCashInHand get() = translate("CASH BALANCE", "नकद शेष (CASH BALANCE)")
     val cashDiscrepancy get() = translate("Cash Discrepancy (Farak)", "नकद अंतर (फरक)")
     val shiftSalesTally get() = translate("SHIFT SALES TALLY (DISCREPANCY)", "शिफ्ट बिक्री टीली (लाभांश / फरक)")
     val tallyPerfect get() = translate("TALLY PERFECT", "बिल्कुल सही मिलान")

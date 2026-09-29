@@ -146,7 +146,7 @@ fun StaffManagementScreen(
                 ) {
                     Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Register New Staff", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        OutlinedTextField(
+                        VoiceOutlinedTextField(
                             value = staffName,
                             onValueChange = { staffName = it },
                             label = { Text("Staff Name") },
@@ -154,7 +154,7 @@ fun StaffManagementScreen(
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp)
                         )
-                        OutlinedTextField(
+                        VoiceOutlinedTextField(
                             value = staffPhone,
                             onValueChange = { staffPhone = it },
                             label = { Text("Mobile Number (Login ID)") },
@@ -179,11 +179,6 @@ fun StaffManagementScreen(
                         }
 
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "Note: No OTP required. Staff can login immediately using their mobile number as Login ID and the 10-digit number as Password.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
 
                         Button(
                             onClick = {

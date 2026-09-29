@@ -56,6 +56,9 @@ fun HistoryScreen(
     var showDeleteConfirmAll by remember { mutableStateOf(false) }
     var auditToDelete by remember { mutableStateOf<SavedAudit?>(null) }
     var selectedFilterDate by remember { mutableStateOf<String?>(null) }
+    
+    // Tracks which groups are expanded
+    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     Scaffold(
         topBar = {
@@ -148,11 +151,11 @@ fun HistoryScreen(
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Date selection bar
+                    // Filter bar
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
@@ -162,89 +165,78 @@ fun HistoryScreen(
                             MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
                         )
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val calendar = java.util.Calendar.getInstance()
-                                    android.app.DatePickerDialog(
-                                        context,
-                                        { _, year, month, dayOfMonth ->
-                                            val formattedDay = String.format("%02d", dayOfMonth)
-                                            val formattedMonth = String.format("%02d", month + 1)
-                                            selectedFilterDate = "$formattedDay-$formattedMonth-$year"
-                                        },
-                                        calendar.get(java.util.Calendar.YEAR),
-                                        calendar.get(java.util.Calendar.MONTH),
-                                        calendar.get(java.util.Calendar.DAY_OF_MONTH)
-                                    ).show()
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Column {
+                            // Date Filter Row
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val calendar = java.util.Calendar.getInstance()
+                                        android.app.DatePickerDialog(
+                                            context,
+                                            { _, year, month, dayOfMonth ->
+                                                val formattedDay = String.format("%02d", dayOfMonth)
+                                                val formattedMonth = String.format("%02d", month + 1)
+                                                selectedFilterDate = "$formattedDay-$formattedMonth-$year"
+                                            },
+                                            calendar.get(java.util.Calendar.YEAR),
+                                            calendar.get(java.util.Calendar.MONTH),
+                                            calendar.get(java.util.Calendar.DAY_OF_MONTH)
+                                        ).show()
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.DateRange,
-                                    contentDescription = "Select Date",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = if (selectedFilterDate != null) {
-                                        LanguageManager.translate("Selected Date: $selectedFilterDate", "चुनी गई तारीख: $selectedFilterDate")
-                                    } else {
-                                        LanguageManager.translate("Select Date to Filter Reports", "रिपोर्ट्स फ़िल्टर करने के लिए तारीख चुनें")
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                    color = if (selectedFilterDate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            if (selectedFilterDate != null) {
-                                TextButton(
-                                    onClick = { selectedFilterDate = null },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Clear Filter",
-                                        modifier = Modifier.size(16.dp)
+                                        imageVector = Icons.Default.DateRange,
+                                        contentDescription = "Select Date",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = LanguageManager.translate("Clear", "साफ करें"),
-                                        style = MaterialTheme.typography.labelMedium
+                                        text = if (selectedFilterDate != null) "Date: $selectedFilterDate" else "Filter by Date",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (selectedFilterDate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                }
+                                if (selectedFilterDate != null) {
+                                    IconButton(onClick = { selectedFilterDate = null }, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
                     }
 
                     val filteredAudits = remember(audits, selectedFilterDate) {
-                        if (selectedFilterDate == null) {
+                        val dateFiltered = if (selectedFilterDate == null) {
                             audits
                         } else {
                             audits.filter { it.date == selectedFilterDate }
                         }
+                        
+                        // Sort by timestamp descending (Recent first)
+                        dateFiltered.sortedByDescending { it.timestamp }
                     }
 
                     val groupedAudits = remember(filteredAudits) {
-                        filteredAudits.groupBy { it.meterNo.ifEmpty { "General Nozzles" } }
-                            .toSortedMap { a, b ->
-                                when {
-                                    a == "General Nozzles" && b != "General Nozzles" -> 1
-                                    a != "General Nozzles" && b == "General Nozzles" -> -1
-                                    else -> {
-                                        val aInt = a.filter { it.isDigit() }.toIntOrNull()
-                                        val bInt = b.filter { it.isDigit() }.toIntOrNull()
-                                        if (aInt != null && bInt != null) aInt.compareTo(bInt)
-                                        else a.compareTo(b, ignoreCase = true)
-                                    }
-                                }
+                        filteredAudits.groupBy { audit ->
+                            audit.meterNo.trim().ifEmpty { "N/A" }
+                        }.toSortedMap { a, b ->
+                            if (a == "Manager Report" && b != "Manager Report") 1
+                            else if (a != "Manager Report" && b == "Manager Report") -1
+                            else {
+                                val aInt = a.filter { it.isDigit() }.toIntOrNull()
+                                val bInt = b.filter { it.isDigit() }.toIntOrNull()
+                                if (aInt != null && bInt != null) aInt.compareTo(bInt)
+                                else a.compareTo(b, ignoreCase = true)
                             }
+                        }
                     }
 
                     if (filteredAudits.isEmpty()) {
@@ -263,15 +255,15 @@ fun HistoryScreen(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = LanguageManager.translate("No Reports for This Date", "इस तारीख के लिए कोई रिपोर्ट नहीं"),
+                                text = LanguageManager.translate("No Reports Found", "कोई रिपोर्ट नहीं मिली"),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = LanguageManager.translate(
-                                    "Try choosing a different date or clear the filter to view all records.",
-                                    "अलग तारीख चुनने का प्रयास करें या सभी रिकॉर्ड देखने के लिए फ़िल्टर साफ करें।"
+                                    "Try choosing a different date or tab to view your records.",
+                                    "अलग तारीख या टैब चुनने का प्रयास करें।"
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -282,53 +274,72 @@ fun HistoryScreen(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val maxTimestamp = filteredAudits.maxOfOrNull { it.timestamp } ?: 0L
+                            
                             
                             groupedAudits.forEach { entry ->
                                 val meterNo = entry.key
                                 val groupList = entry.value
-                                
+                                val groupMaxTimestamp = groupList.maxOfOrNull { it.timestamp } ?: 0L
+                                // Start collapsed by default so they act like dropdowns
+                                val isExpanded = expandedGroups[meterNo] ?: false
+
                                 item {
+                                    val isManagerGroup = meterNo == "Manager Report"
                                     Surface(
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                                        shape = RoundedCornerShape(8.dp)
+                                        color = if (isManagerGroup) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.clickable { 
+                                            expandedGroups[meterNo] = !isExpanded 
+                                        }
                                     ) {
-                                        Text(
-                                            text = "Machine/Nozzle: $meterNo",
-                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (isManagerGroup) "Manager Report" else "Nozzle No: $meterNo",
+                                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+                                                color = if (isManagerGroup) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                                            )
+                                            Icon(
+                                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                if (isExpanded) {
+                                    items(groupList, key = { it.timestamp }) { audit ->
+                                        val isGroupNewest = audit.timestamp == groupMaxTimestamp
+                                        
+                                        AuditHistoryCard(
+                                            audit = audit,
+                                            onView = { selectedAudit = audit },
+                                            onEdit = { auditToEdit = audit },
+                                            onShare = {
+                                                PdfGenerator.sharePdf(context, audit.summaryText, audit.caName, audit.date)
+                                            },
+                                            onPrint = {
+                                                printSavedReportHtml(context, audit)
+                                            },
+                                            onDelete = { 
+                                                if (isGroupNewest) {
+                                                    auditToDelete = audit
+                                                } else {
+                                                    Toast.makeText(context, "Only the newest report for this nozzle can be deleted", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            showDelete = isGroupNewest
                                         )
                                     }
                                 }
                                 
-                                items(groupList, key = { it.timestamp }) { audit ->
-                                    val isGlobalNewest = audit.timestamp == maxTimestamp
-                                    
-                                    AuditHistoryCard(
-                                        audit = audit,
-                                        onView = { selectedAudit = audit },
-                                        onEdit = { auditToEdit = audit },
-                                        onShare = {
-                                            PdfGenerator.sharePdf(context, audit.summaryText, audit.caName, audit.date)
-                                        },
-                                        onPrint = {
-                                            printSavedReportHtml(context, audit)
-                                        },
-                                        onDelete = { 
-                                            if (isGlobalNewest) {
-                                                auditToDelete = audit
-                                            } else {
-                                                Toast.makeText(context, "Only the newest report can be deleted", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        showDelete = isGlobalNewest
-                                    )
-                                }
-                                
-                                item { Spacer(modifier = Modifier.height(8.dp)) }
+                                item { Spacer(modifier = Modifier.height(4.dp)) }
                             }
                         }
                     }
@@ -340,6 +351,15 @@ fun HistoryScreen(
     // Details View Dialog
     if (selectedAudit != null) {
         val audit = selectedAudit!!
+        val isManagerReport = audit.auditType == "Manager's Report"
+        var managerTransactions by remember { mutableStateOf<List<com.example.database.ManagerTransaction>>(emptyList()) }
+        
+        LaunchedEffect(audit) {
+            if (isManagerReport) {
+                managerTransactions = com.example.database.SupabaseRepository.getManagerTransactionsByReportId(adminPhone, audit.reportId)
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { selectedAudit = null },
             title = {
@@ -372,38 +392,93 @@ fun HistoryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (audit.meterNo.isNotEmpty()) {
-                        Text(
-                            text = "Meter: ${audit.meterNo}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             },
             text = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        .padding(12.dp)
-                ) {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        item {
-                            Text(
-                                text = audit.summaryText,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (isManagerReport) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Opening Balance:", style = MaterialTheme.typography.labelMedium)
+                                    Text("₹${formatDouble(audit.openingBalanceUsed)}", fontWeight = FontWeight.Bold)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Cash Available:", style = MaterialTheme.typography.labelMedium)
+                                    Text("₹${formatDouble(audit.cashAvailableToDeposit)}", fontWeight = FontWeight.Bold)
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Final Difference:", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black))
+                                    Text("₹${formatDouble(audit.manualDifference)}", fontWeight = FontWeight.Black, color = Color(0xFFC62828))
+                                }
+                                Text(
+                                    text = if (audit.isSettled) "Report Status: SETTLED (Next start at ₹0)" else "Report Status: CARRIED FORWARD",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (audit.isSettled) Color(0xFF15803D) else Color(0xFF1E293B),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        
+                        Text("Transaction Details", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold))
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 250.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                .padding(8.dp)
+                        ) {
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                items(managerTransactions) { tx ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(0.3f)) {
+                                            Text(tx.date, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                        }
+                                        Column(Modifier.weight(0.7f)) {
+                                            Text(tx.type.replace("_", " "), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                            if (!tx.description.isNullOrBlank()) {
+                                                Text(tx.description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                            }
+                                        }
+                                        val sign = if (tx.type.contains("JAMA") || tx.type.contains("BORROWED")) "+" else "-"
+                                        val color = if (sign == "+") Color(0xFF15803D) else Color(0xFFC62828)
+                                        Text("$sign₹${formatDouble(tx.amount)}", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Black), color = color)
+                                    }
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                }
+                                if (managerTransactions.isEmpty()) {
+                                    item { Text("No individual transactions linked.", style = MaterialTheme.typography.bodySmall, color = Color.Gray) }
+                                }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 400.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                .padding(12.dp)
+                        ) {
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                item {
+                                    Text(
+                                        text = audit.summaryText,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -519,7 +594,7 @@ fun HistoryScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedTextField(
+                    VoiceOutlinedTextField(
                         value = editedCaName,
                         onValueChange = { editedCaName = it },
                         label = { Text(LanguageManager.translate("CA Name / Employee", "सीए नाम / कर्मचारी")) },
@@ -527,15 +602,15 @@ fun HistoryScreen(
                         singleLine = true
                     )
 
-                    OutlinedTextField(
+                    VoiceOutlinedTextField(
                         value = editedMeterNo,
                         onValueChange = { editedMeterNo = it },
-                        label = { Text(LanguageManager.translate("Meter Number", "मीटर नंबर")) },
+                        label = { Text(LanguageManager.translate("Nozzle Number", "नोजल नंबर")) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
 
-                    OutlinedTextField(
+                    VoiceOutlinedTextField(
                         value = editedSummaryText,
                         onValueChange = { editedSummaryText = it },
                         label = { Text(LanguageManager.translate("Report Summary", "रिपोर्ट सारांश")) },
@@ -589,7 +664,9 @@ fun AuditHistoryCard(
     showDelete: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val isManagerReport = audit.auditType == "Manager's Report"
     val badgeColor = when {
+        isManagerReport -> Color(0xFF1E3A8A) // Dark Blue for Manager
         audit.auditType.contains("2") -> Color(0xFF0284C7) // Sky blue
         audit.auditType.contains("4") -> Color(0xFF0D9488) // Teal
         else -> Color(0xFF7C3AED) // Purple
@@ -611,8 +688,7 @@ fun AuditHistoryCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+                verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -690,17 +766,25 @@ fun AuditHistoryCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Pin,
+                            imageVector = if (isManagerReport) Icons.Default.TrendingDown else Icons.Default.Pin,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isManagerReport) Color(0xFFC62828) else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = "Meter No: ${audit.meterNo}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = if (isManagerReport) "Final Difference: ₹${formatDouble(audit.manualDifference)}" else "Nozzle No: ${audit.meterNo}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = if (isManagerReport) FontWeight.Bold else FontWeight.Normal),
+                            color = if (isManagerReport) Color(0xFFC62828) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+                
+                if (isManagerReport) {
+                    Text(
+                        text = if (audit.isSettled) "Status: SETTLED" else "Status: CARRIED FORWARD",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                        color = if (audit.isSettled) Color(0xFF15803D) else Color(0xFF1E3A8A)
+                    )
                 }
             }
 

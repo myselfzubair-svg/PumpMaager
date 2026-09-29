@@ -24,32 +24,101 @@ object SupabaseUserManager {
     private val client = SupabaseClient.client
 
     /**
-     * Registers a new owner and all associated data in a single atomic transaction.
+     * Standardizes a mobile number to include country code (default to +91 for India if 10 digits)
+     */
+    fun formatMobileNumber(mobile: String): String {
+        val clean = mobile.filter { it.isDigit() }
+        return when {
+            clean.length == 10 -> "+91$clean"
+            clean.length > 10 && !mobile.startsWith("+") -> "+$clean"
+            else -> mobile
+        }
+    }
+
+    /**
+     * Registers a new owner and all associated data in a single atomic transaction,
+     * with a robust direct table upsert fallback if the RPC function is missing or fails.
      */
     suspend fun registerOwnerAtomic(params: RegistrationParams): Result<SupabaseUser> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Starting atomic registration for: ${params.p_user_data.mobileNumber}")
             
-            // Hardened RPC call with detailed logging
-            val response = client.postgrest.rpc("register_new_owner_atomic", params)
-            
-            // Log raw response for debugging "EOF" errors
-            Log.d(TAG, "RPC Response Body: ${response.data}")
+            var savedUser: SupabaseUser? = null
+            var rpcError: Exception? = null
 
-            if (response.data.isBlank() || response.data == "null") {
-                throw Exception("Received empty response from database. Check if function exists and is granted permissions.")
+            // Try RPC first (bypasses RLS via SECURITY DEFINER)
+            try {
+                val response = client.postgrest.rpc("register_new_owner_atomic", params)
+                Log.d(TAG, "RPC Response Body: ${response.data}")
+
+                if (response.data.isNotBlank() && response.data != "null") {
+                    savedUser = try {
+                        response.decodeSingle<SupabaseUser>()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "decodeSingle failed, attempting direct decode")
+                        response.decodeAs<SupabaseUser>()
+                    }
+                }
+            } catch (rpcEx: Exception) {
+                rpcError = rpcEx
+                Log.w(TAG, "RPC register_new_owner_atomic failed or not found: ${rpcEx.message}")
             }
 
-            // Since RPC returns a single JSONB object, decodeAs or decodeSingle should work depending on the version behavior.
-            // In 2.6.1, decodeSingle() expects a list and takes the first element.
-            // If the RPC returns a raw object, we might need decodeAs<SupabaseUser>().
-            val result = try {
-                response.decodeSingle<SupabaseUser>()
-            } catch (e: Exception) {
-                Log.w(TAG, "decodeSingle failed, attempting direct decode")
-                response.decodeAs<SupabaseUser>()
+            // If RPC failed or didn't return a savedUser, try direct table upserts
+            if (savedUser == null) {
+                try {
+                    val user = params.p_user_data
+                    val pumpInfo = params.p_pump_data
+                    val nozzles = params.p_nozzles
+                    val mobile = user.mobileNumber
+
+                    val userResponse = client.postgrest["users"].upsert(user, onConflict = "mobile_number") {
+                        select()
+                    }
+                    val freshUser = userResponse.decodeSingleOrNull<SupabaseUser>() ?: user
+
+                    // Upsert Pump Info
+                    client.postgrest["pumps"].upsert(pumpInfo)
+
+                    // Upsert Membership
+                    val membership = SupabaseMembership(
+                        staffPhone = mobile,
+                        adminPhone = mobile,
+                        pumpName = pumpInfo.pumpName,
+                        username = user.username ?: "Admin",
+                        role = "ADMIN",
+                        accountId = freshUser.id
+                    )
+                    client.postgrest["memberships"].upsert(membership, onConflict = "staff_phone,admin_phone")
+
+                    // Save Nozzles into registered_nozzles table
+                    if (nozzles.isNotEmpty()) {
+                        Log.d(TAG, "Saving ${nozzles.size} nozzles for $mobile")
+                        try {
+                            client.postgrest["registered_nozzles"].delete {
+                                filter {
+                                    eq("mobile_number", mobile)
+                                }
+                            }
+                            client.postgrest["registered_nozzles"].insert(nozzles)
+                        } catch (nozEx: Exception) {
+                            Log.w(TAG, "Delete/Insert nozzles failed, trying upsert fallback: ${nozEx.message}")
+                            client.postgrest["registered_nozzles"].upsert(nozzles)
+                        }
+                    }
+                    Result.success(freshUser)
+                } catch (directEx: Exception) {
+                    Log.e(TAG, "Direct table upsert failed: ${directEx.message}", directEx)
+                    if (directEx.message?.contains("row level security", ignoreCase = true) == true ||
+                        rpcError?.message?.contains("function", ignoreCase = true) == true) {
+                        throw Exception("Database Setup Required: Please execute schema.sql in your Supabase SQL Editor. This sets up the registration function and disables Row Level Security (RLS) so tables can be written to.")
+                    } else {
+                        throw directEx
+                    }
+                }
+            } else {
+                Result.success(savedUser)
             }
-            Result.success(result)
         } catch (e: Exception) {
             Log.e(TAG, "Atomic registration failed: ${e.message}", e)
             Result.failure(e)
@@ -61,7 +130,7 @@ object SupabaseUserManager {
      */
     suspend fun checkUserInSupabase(mobileNumber: String): Result<SupabaseUser?> = withContext(Dispatchers.IO) {
         try {
-            val formattedMobile = SmsOtpManager.formatMobileNumber(mobileNumber)
+            val formattedMobile = formatMobileNumber(mobileNumber)
             Log.d(TAG, "Checking Supabase 'users' table for: $formattedMobile")
             
             val response = client.postgrest["users"].select(columns = Columns.ALL) {
@@ -90,7 +159,7 @@ object SupabaseUserManager {
         passwordHash: String = ""
     ): Result<SupabaseUser> = withContext(Dispatchers.IO) {
         try {
-            val formattedMobile = SmsOtpManager.formatMobileNumber(mobileNumber)
+            val formattedMobile = formatMobileNumber(mobileNumber)
             Log.d(TAG, "Saving user to Supabase 'users' table: $formattedMobile")
             
             val user = SupabaseUser(
@@ -131,7 +200,7 @@ object SupabaseUserManager {
      */
     suspend fun getUserMemberships(mobileNumber: String): Result<List<SupabaseMembership>> = withContext(Dispatchers.IO) {
         try {
-            val formattedMobile = SmsOtpManager.formatMobileNumber(mobileNumber)
+            val formattedMobile = formatMobileNumber(mobileNumber)
             val response = client.postgrest["memberships"].select(columns = Columns.ALL) {
                 filter {
                     eq("staff_phone", formattedMobile)

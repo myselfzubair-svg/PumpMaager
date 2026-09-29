@@ -354,7 +354,7 @@ fun MonthlyExpensesReportScreen(
 
             // SEARCH BAR
             item {
-                OutlinedTextField(
+                VoiceOutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     placeholder = {

@@ -34,9 +34,10 @@ fun ManagerDashboardScreen(
     onNavigateToDailySalesReport: () -> Unit,
     onNavigateToTtEntryReport: () -> Unit,
     onNavigateToMonthlyExpensesReport: () -> Unit,
-    onNavigateToMonthlyCreditReport: () -> Unit,
     onNavigateToMonthlyUdhariJamaReport: () -> Unit,
     onNavigateToCustomerUdhariLedgerReport: () -> Unit,
+    onNavigateToDensityHistory: () -> Unit,
+    onNavigateToPriceHistory: () -> Unit,
     adminPhone: String = "",
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -139,15 +140,17 @@ fun ManagerDashboardScreen(
                     Column {
                         ReportRowItem("Daily Sales Audit Report", "Reconcile shift sales and print audit PDF", Icons.Default.Assessment, Color(0xFF2563EB)) { onNavigateToDailyAudit(selectedDate) }
                         HorizontalDivider(color = Color(0xFFF1F5F9))
-                        ReportRowItem("Monthly Sales Report", "View full month sales, stocks, and rates summary", Icons.Default.LocalGasStation, Color(0xFF3B82F6), onNavigateToDailySalesReport)
+                        ReportRowItem("Monthly Sales Purchase Report", "View full month sales, purchases, stocks, and rates summary", Icons.Default.LocalGasStation, Color(0xFF3B82F6), onNavigateToDailySalesReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Monthly Expenses Report", "Summary and details of daily station expenses", Icons.Default.TrendingDown, Color(0xFFEF4444), onNavigateToMonthlyExpensesReport)
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-                        ReportRowItem("Monthly Credit Report", "View outstanding credits and party details", Icons.Default.TrendingUp, Color(0xFF2563EB), onNavigateToMonthlyCreditReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Monthly Udhari Jama Report", "Track recovered outstanding credits", Icons.Default.TrendingUp, Color(0xFF10B981), onNavigateToMonthlyUdhariJamaReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Customer Credit Ledger", "Detailed party-wise credit/recovery tracking", Icons.Default.AccountBalanceWallet, Color(0xFFF59E0B), onNavigateToCustomerUdhariLedgerReport)
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        ReportRowItem("Density History Report", "Monthly history of fuel density for all products", Icons.Default.Opacity, Color(0xFF06B6D4), onNavigateToDensityHistory)
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        ReportRowItem("Price History Report", "Monthly history of fuel rates for all products", Icons.Default.History, Color(0xFF8B5CF6), onNavigateToPriceHistory)
                     }
                 }
             }

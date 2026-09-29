@@ -88,7 +88,6 @@ fun LoginScreen(
     var showAccountSelection by remember { mutableStateOf(false) }
     var usernameError by remember { mutableStateOf<String?>(null) }
     var mobileNumberError by remember { mutableStateOf<String?>(null) }
-    var otpError by remember { mutableStateOf<String?>(null) }
     var isPumpSetupActive by rememberSaveable { mutableStateOf(false) }
     var setupStep by rememberSaveable { mutableStateOf(1) }
     var pumpName by rememberSaveable { mutableStateOf("") }
@@ -110,7 +109,7 @@ fun LoginScreen(
 
     // Logic Functions
     val resetFormStates = {
-        usernameError = null; mobileNumberError = null; otpError = null
+        usernameError = null; mobileNumberError = null
         mobileNumber = ""; password = ""; confirmPassword = ""
         isPumpSetupActive = false
         setupStep = 1; pumpName = ""; ownerName = ""; totalTanksInput = "1"
@@ -187,41 +186,27 @@ fun LoginScreen(
         
         if (isSignUpMode && !isPumpSetupActive) {
             // Sign Up validation
-            if (u.isEmpty() || ownerName.isEmpty() || m.isEmpty() || password.isEmpty() || confirmPassword.isEmpty()) {
-                if (u.isEmpty()) usernameError = "Required"
-                if (ownerName.isEmpty()) mobileNumberError = "Required" 
-                if (m.isEmpty()) mobileNumberError = "Required"
-                if (password.isEmpty()) otpError = "Required"
-                if (confirmPassword.isEmpty()) otpError = "Required"
-            } else if (password != confirmPassword) {
-                otpError = "Passwords do not match"
-            } else if (password.length < 6) {
-                otpError = "Min 6 digits"
-            } else {
                 isLoading = true
                 coroutineScope.launch {
-                    val f = SmsOtpManager.formatMobileNumber(m)
+                    val f = SupabaseUserManager.formatMobileNumber(m)
                     val check = SupabaseUserManager.checkUserInSupabase(f)
                     if (check.getOrNull() != null) {
                         mobileNumberError = "Already registered"
                         isLoading = false
                     } else {
-                        // Directly proceed to pump setup for signup as requested (no OTP)
                         isLoading = false
                         pumpName = u
                         isPumpSetupActive = true
                     }
                 }
-            }
         } else if (!isSignUpMode) {
             // LOGIN MODE
             if (m.isEmpty() || password.isEmpty()) {
                 mobileNumberError = if (m.isEmpty()) "Required" else null
-                otpError = if (password.isEmpty()) "Required" else null
             } else {
                 isLoading = true
                 coroutineScope.launch {
-                    val f = SmsOtpManager.formatMobileNumber(m)
+                    val f = SupabaseUserManager.formatMobileNumber(m)
                     
                     // 1. Check Owners (users table)
                     val ownerResult = SupabaseUserManager.checkUserInSupabase(f)
@@ -240,7 +225,7 @@ fun LoginScreen(
                         completeLoginFlow(f, m)
                     } else {
                         isLoading = false
-                        otpError = "Invalid login ID or password"
+                        mobileNumberError = "Invalid login ID or password"
                     }
                 }
             }
@@ -251,7 +236,7 @@ fun LoginScreen(
         isLoading = true
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val formattedMobile = SmsOtpManager.formatMobileNumber(mobileNumber)
+                val formattedMobile = SupabaseUserManager.formatMobileNumber(mobileNumber)
                 
                 // Use the new hierarchical nozzle configs
                 val allRegisteredNozzles = nozzleConfigs.mapIndexed { index, config ->
@@ -355,7 +340,7 @@ fun LoginScreen(
         }
 
         Column(
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Premium Header Bar
@@ -425,17 +410,17 @@ fun LoginScreen(
                                     
                                     PremiumTextField(
                                         value = password, 
-                                        onValueChange = { password = it; otpError = null }, 
+                                        onValueChange = { password = it }, 
                                         label = if (isSignUpMode) "Create Password" else "Password", 
                                         icon = Icons.Default.Lock, 
-                                        error = if (!isSignUpMode) otpError else null,
+                                        error = if (!isSignUpMode) mobileNumberError else null,
                                         keyboardType = KeyboardType.NumberPassword,
                                         isPassword = true,
                                         onDone = { if (!isSignUpMode) handleAuth() }
                                     )
 
                                     if (isSignUpMode) {
-                                        PremiumTextField(value = confirmPassword, onValueChange = { confirmPassword = it; otpError = null }, label = "Confirm Password", icon = Icons.Default.Lock, error = otpError, keyboardType = KeyboardType.NumberPassword, isPassword = true, onDone = { handleAuth() })
+                                        PremiumTextField(value = confirmPassword, onValueChange = { confirmPassword = it }, label = "Confirm Password", icon = Icons.Default.Lock, error = null, keyboardType = KeyboardType.NumberPassword, isPassword = true, onDone = { handleAuth() })
                                     }
 
                                     PremiumButton(text = if (isSignUpMode) "Register" else "Login", isLoading = isLoading, onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); handleAuth() })
@@ -520,7 +505,7 @@ fun PremiumTextField(
     onDone: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
+        VoiceOutlinedTextField(
             value = value, onValueChange = onValueChange,
             label = { Text(label, style = MaterialTheme.typography.bodySmall) },
             leadingIcon = { Icon(imageVector = icon, contentDescription = null, tint = if (error != null) MaterialTheme.colorScheme.error else Color(0xFF3B82F6).copy(alpha = 0.6f), modifier = Modifier.size(20.dp)) },
@@ -696,7 +681,7 @@ fun PetrolPumpSetupFlow(
                     
                     var customProduct by remember { mutableStateOf("") }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                        VoiceOutlinedTextField(
                             value = customProduct,
                             onValueChange = { customProduct = it },
                             label = { Text("Custom Product") },
@@ -784,7 +769,7 @@ fun PetrolPumpSetupFlow(
                             }
                             
                             tankConfigs.filter { it.product == product }.forEach { tank ->
-                                OutlinedTextField(
+                                VoiceOutlinedTextField(
                                     value = tank.name,
                                     onValueChange = { newVal ->
                                         val updated = tankConfigs.toMutableList()
@@ -864,7 +849,7 @@ fun PetrolPumpSetupFlow(
                             
                             nozzles.forEach { nozzle ->
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
+                                    VoiceOutlinedTextField(
                                         value = nozzle.number,
                                         onValueChange = { newVal ->
                                             val updated = nozzleConfigs.toMutableList()
@@ -879,7 +864,7 @@ fun PetrolPumpSetupFlow(
                                         shape = RoundedCornerShape(12.dp),
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                     )
-                                    OutlinedTextField(
+                                    VoiceOutlinedTextField(
                                         value = nozzle.name,
                                         onValueChange = { newVal ->
                                             val updated = nozzleConfigs.toMutableList()
@@ -931,7 +916,7 @@ fun PetrolPumpSetupFlow(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
                         Text(product, fontWeight = FontWeight.ExtraBold, color = Color(0xFF3B82F6))
                         nozzles.forEach { nozzle ->
-                            OutlinedTextField(
+                            VoiceOutlinedTextField(
                                 value = nozzle.initialReading,
                                 onValueChange = { newVal ->
                                     var seenDot = false

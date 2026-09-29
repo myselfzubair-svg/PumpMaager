@@ -88,8 +88,8 @@ fun MonthlyCreditReportScreen(
         resetAndBack()
     }
 
-    // Load audits from Cloud
-    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    // Load data from Cloud
+    val allCreditsState = com.example.database.SupabaseRepository.getCreditEntriesFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -106,27 +106,24 @@ fun MonthlyCreditReportScreen(
         monthNamesHi[selectedMonth]
     )
 
-    // Parse all credits from audits
-    val parsedCredits = remember(allAuditsState.value, selectedMonth, selectedYear) {
+    // Parse all credits from DB entries
+    val parsedCredits = remember(allCreditsState.value, selectedMonth, selectedYear) {
         val list = mutableListOf<CreditRecord>()
         val monthStr = String.format(Locale.getDefault(), "%02d", selectedMonth + 1)
         val yearStr = selectedYear.toString()
         val suffix = "-$monthStr-$yearStr"
 
-        allAuditsState.value.forEach { audit ->
-            if (audit.date.endsWith(suffix)) {
-                val extracted = parseDetailedCredits(audit.summaryText)
-                extracted.forEach { (desc, amt) ->
-                    list.add(
-                        CreditRecord(
-                            date = audit.date,
-                            description = desc,
-                            amount = amt,
-                            caName = audit.caName,
-                            auditId = audit.id ?: 0
-                        )
+        allCreditsState.value.forEach { entry ->
+            if (entry.date.endsWith(suffix)) {
+                list.add(
+                    CreditRecord(
+                        date = entry.date,
+                        description = "${entry.party}: ${entry.description}",
+                        amount = entry.amount,
+                        caName = entry.caName,
+                        auditId = entry.id?.toInt() ?: 0
                     )
-                }
+                )
             }
         }
         // Sort chronologically by parsing date dd-MM-yyyy
@@ -431,7 +428,7 @@ fun MonthlyCreditReportScreen(
 
             // SEARCH BAR
             item {
-                OutlinedTextField(
+                VoiceOutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier

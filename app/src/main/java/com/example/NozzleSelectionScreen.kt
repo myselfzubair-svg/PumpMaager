@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import com.example.database.RegisteredNozzle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -44,6 +46,7 @@ fun NozzleSelectionScreen(
     onLogout: () -> Unit = {},
     username: String = "",
     adminPhone: String = "",
+    userRole: String = "CA",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -53,8 +56,13 @@ fun NozzleSelectionScreen(
 
     // Screen State
     var nozzlesList by remember { mutableStateOf<List<RegisteredNozzle>>(emptyList()) }
+    var staffList by remember { mutableStateOf<List<String>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // State: CA Name Selection
+    var selectedCaName by rememberSaveable { mutableStateOf(username) }
+    var isCaDropdownExpanded by remember { mutableStateOf(false) }
 
     // State: Date
     var selectedDate by rememberSaveable { mutableStateOf(sdf.format(Date())) }
@@ -65,31 +73,42 @@ fun NozzleSelectionScreen(
     
     var showError by remember { mutableStateOf(false) }
 
-    val refreshNozzles = {
+    val loadData = {
         if (adminPhone.isNotBlank()) {
             isLoading = true
             errorMessage = null
             coroutineScope.launch {
                 try {
-                    val list = withContext(Dispatchers.IO) {
-                        com.example.database.SupabaseRepository.getRegisteredNozzles(adminPhone)
+                    nozzlesList = com.example.database.SupabaseRepository.getRegisteredNozzles(adminPhone)
+                    
+                    if (userRole.uppercase() != "CA") {
+                        com.example.database.SupabaseRepository.getStaffMembersFlow(adminPhone).take(1).collect { members ->
+                            val names = (listOf(username) + members.map { it.name }).distinct().sorted()
+                            staffList = names
+                        }
                     }
-                    Log.d("NozzleSelection", "Received ${list.size} nozzles")
-                    nozzlesList = list
-                    isLoading = false
                 } catch (e: Exception) {
-                    Log.e("NozzleSelection", "Error loading nozzles: ${e.message}", e)
                     errorMessage = LanguageManager.errorLoadingNozzles
+                } finally {
                     isLoading = false
                 }
             }
         }
     }
 
-    // Fetch Nozzles every time screen is opened
+    // Fetch Staff Names (Continuous updates)
     LaunchedEffect(adminPhone) {
-        Log.d("NozzleSelection", "LaunchedEffect triggered for adminPhone: [$adminPhone]")
-        refreshNozzles()
+        if (adminPhone.isNotBlank() && userRole.uppercase() != "CA") {
+            com.example.database.SupabaseRepository.getStaffMembersFlow(adminPhone).collect { members ->
+                val names = (listOf(username) + members.map { it.name }).distinct().sorted()
+                staffList = names
+            }
+        }
+    }
+
+    // Initial Load
+    LaunchedEffect(adminPhone) {
+        loadData()
     }
 
     // Filter active nozzles from DB
@@ -175,29 +194,13 @@ fun NozzleSelectionScreen(
                             color = MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.Center
                         )
-                        TextButton(onClick = { 
-                            // Retry logic
-                            isLoading = true
-                            errorMessage = null
-                            coroutineScope.launch {
-                                try {
-                                    val list = withContext(Dispatchers.IO) {
-                                        com.example.database.SupabaseRepository.getRegisteredNozzles(adminPhone)
-                                    }
-                                    nozzlesList = list
-                                } catch (e: Exception) {
-                                    errorMessage = LanguageManager.errorLoadingNozzles
-                                } finally {
-                                    isLoading = false
-                                }
-                            }
-                        }) {
+                        TextButton(onClick = { loadData() }) {
                             Text(LanguageManager.translate("Retry", "पुनः प्रयास करें"))
                         }
                     }
                 }
             } else {
-                // STEP 1: CA NAME (READ ONLY)
+                // STEP 1: CA NAME (Dropdown for Managers, Read-only for CA)
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -210,13 +213,48 @@ fun NozzleSelectionScreen(
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Text(
-                                text = "$username ${LanguageManager.caNameAutoFilled}",
-                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                        
+                        if (userRole.uppercase() == "CA" || staffList.isEmpty()) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = "$username ${LanguageManager.caNameAutoFilled}",
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            // DROPDOWN for Admin/Manager
+                            Box {
+                                VoiceOutlinedTextField(
+                                    value = selectedCaName,
+                                    onValueChange = { selectedCaName = it },
+                                    label = { Text(LanguageManager.selectCaName) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    leadingIcon = { Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary) },
+                                    trailingIcon = {
+                                        IconButton(onClick = { isCaDropdownExpanded = true }) {
+                                            Icon(Icons.Default.ArrowDropDown, null)
+                                        }
+                                    },
+                                    readOnly = true // Forced selection from list
+                                )
+                                DropdownMenu(
+                                    expanded = isCaDropdownExpanded,
+                                    onDismissRequest = { isCaDropdownExpanded = false },
+                                    modifier = Modifier.fillMaxWidth(0.8f)
+                                ) {
+                                    staffList.forEach { name ->
+                                        DropdownMenuItem(
+                                            text = { Text(name, fontWeight = if (name == username) FontWeight.Bold else FontWeight.Normal) },
+                                            onClick = {
+                                                selectedCaName = name
+                                                isCaDropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -303,7 +341,7 @@ fun NozzleSelectionScreen(
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(Modifier.height(12.dp))
-                                Button(onClick = { refreshNozzles() }) {
+                                Button(onClick = { loadData() }) {
                                     Icon(Icons.Default.Refresh, null)
                                     Spacer(Modifier.width(8.dp))
                                     Text("Retry Fetch")
@@ -330,7 +368,7 @@ fun NozzleSelectionScreen(
                         }
                     } else {
                         // Search & Bulk Select
-                        OutlinedTextField(
+                        VoiceOutlinedTextField(
                             value = nozzleSearchQuery,
                             onValueChange = { nozzleSearchQuery = it },
                             placeholder = { Text(LanguageManager.searchNozzles) },
@@ -441,7 +479,7 @@ fun NozzleSelectionScreen(
                             showError = true
                         } else {
                             val nozzles = activeNozzles.filter { selectedNozzleIds.contains(it.nozzleId) }
-                            onNavigateToCalculator(nozzles, selectedDate, username)
+                            onNavigateToCalculator(nozzles, selectedDate, selectedCaName)
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp).testTag("start_calculation_button"),

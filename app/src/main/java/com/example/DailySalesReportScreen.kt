@@ -69,11 +69,35 @@ fun DailySalesReportScreen(
     var selectedMonth by rememberSaveable { mutableStateOf(calendar.get(Calendar.MONTH)) }
     var selectedYear by rememberSaveable { mutableStateOf(calendar.get(Calendar.YEAR)) }
 
-    // Fetch all daily configs from Cloud
+    // Fetch all daily configs, pump data, and TT receipts from Cloud
     var allDailyConfigs by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
-    LaunchedEffect(adminPhone) {
+    var allTtEntries by remember { mutableStateOf<List<com.example.database.TtReceiptEntry>>(emptyList()) }
+    var allDailyPumpDataMap by remember { mutableStateOf<Map<String, List<com.example.database.DailyPumpData>>>(emptyMap()) }
+
+    // Generate days list for the selected month
+    val daysInMonthList = remember(selectedMonth, selectedYear) {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.YEAR, selectedYear)
+        cal.set(Calendar.MONTH, selectedMonth)
+        val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+        (1..maxDays).map { day ->
+            String.format(Locale.getDefault(), "%02d-%02d-%04d", day, selectedMonth + 1, selectedYear)
+        }
+    }
+
+    LaunchedEffect(adminPhone, selectedMonth, selectedYear) {
         if (adminPhone.isNotBlank()) {
             allDailyConfigs = com.example.database.SupabaseRepository.getAllDailyConfigs(adminPhone)
+            allTtEntries = com.example.database.SupabaseRepository.getTtEntries(adminPhone)
+
+            val map = mutableMapOf<String, List<com.example.database.DailyPumpData>>()
+            daysInMonthList.forEach { dateStr ->
+                val data = com.example.database.SupabaseRepository.getDailyPumpData(adminPhone, dateStr)
+                if (data.isNotEmpty()) {
+                    map[dateStr] = data
+                }
+            }
+            allDailyPumpDataMap = map
         }
     }
 
@@ -90,21 +114,10 @@ fun DailySalesReportScreen(
         }
     }
 
-    // Generate days list for the selected month
-    val daysInMonthList = remember(selectedMonth, selectedYear) {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.YEAR, selectedYear)
-        cal.set(Calendar.MONTH, selectedMonth)
-        val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-        (1..maxDays).map { day ->
-            String.format(Locale.getDefault(), "%02d-%02d-%04d", day, selectedMonth + 1, selectedYear)
-        }
-    }
-
     // Build dataset for each day of the month
-    val dailyDataList = remember(daysInMonthList, allGeneralReadings, allAudits, allDailyConfigs, stationProducts) {
+    val dailyDataList = remember(daysInMonthList, allGeneralReadings, allAudits, allDailyConfigs, allDailyPumpDataMap, allTtEntries, stationProducts) {
         daysInMonthList.map { dateStr ->
-            val dayAudits = allAudits.filter { it.date == dateStr }
+            val dayAudits = allAudits.filter { it.date == dateStr && it.auditType != "Manager's Report" }
             val dayCashSubmitted = dayAudits.sumOf { it.cashSubmitted }
             val dayActualCashCollected = dayAudits.sumOf { it.actualCashCollected }
             val dayTotalCashCollected = dayCashSubmitted + dayActualCashCollected
@@ -142,21 +155,61 @@ fun DailySalesReportScreen(
                     productTotalClosing += lastCl
                     productNozzleDetailsList.add(NozzleDailyDetail(label, product, firstOp, lastCl, nozzleTesting, netSales))
                 }
+                productNozzleDetailsList.sortBy { extractNozzleNumber(it.label) }
+
+                val dayPumpDataList = allDailyPumpDataMap[dateStr] ?: emptyList()
+                val productPumpData = dayPumpDataList.find { isSameProduct(it.productName, product) }
 
                 val dayConfig = allDailyConfigs[dateStr] ?: emptyMap()
-                val rate = dayConfig["rate_${product.lowercase().replace(" ", "_")}"]?.toDoubleOrNull() 
+                val pKey = product.lowercase().replace(" ", "_")
+
+                val rate = productPumpData?.rate?.takeIf { it > 0.0 }
+                    ?: dayConfig["rate_$pKey"]?.toDoubleOrNull()
                     ?: if (isSameProduct(product, "MS")) dayConfig["rate_ms"]?.toDoubleOrNull() ?: 0.0
                        else if (isSameProduct(product, "HSD")) dayConfig["rate_hsd"]?.toDoubleOrNull() ?: 0.0
                        else 0.0
-                val stock = dayConfig["stock_${product.lowercase().replace(" ", "_")}"]?.toDoubleOrNull()
+
+                val openingStock = productPumpData?.openingStock?.takeIf { it > 0.0 }
+                    ?: dayConfig["stock_$pKey"]?.toDoubleOrNull()
                     ?: if (isSameProduct(product, "MS")) dayConfig["stock_ms"]?.toDoubleOrNull() ?: 0.0
                        else if (isSameProduct(product, "HSD")) dayConfig["stock_hsd"]?.toDoubleOrNull() ?: 0.0
                        else 0.0
 
+                val dayTtEntries = allTtEntries.filter { it.date == dateStr }
+                val ttReceiptLtrs = dayTtEntries.sumOf { tt ->
+                    if (isSameProduct(product, "MS") || isSameProduct(product, "Petrol")) {
+                        if (tt.msInvoiceQuantity > 0.0) tt.msInvoiceQuantity 
+                        else (tt.msPostDecantationStock - tt.msPreDecantationStock).coerceAtLeast(0.0)
+                    } else if (isSameProduct(product, "HSD") || isSameProduct(product, "Diesel")) {
+                        if (tt.hsdInvoiceQuantity > 0.0) tt.hsdInvoiceQuantity 
+                        else (tt.hsdPostDecantationStock - tt.hsdPreDecantationStock).coerceAtLeast(0.0)
+                    } else if (tt.extraProductName != null && isSameProduct(product, tt.extraProductName)) {
+                        if (tt.extraInvoiceQuantity > 0.0) tt.extraInvoiceQuantity
+                        else (tt.extraPostDecantationStock - tt.extraPreDecantationStock).coerceAtLeast(0.0)
+                    } else 0.0
+                }
+                val receipts = if (ttReceiptLtrs > 0.0) ttReceiptLtrs else (dayConfig["receipt_$pKey"]?.toDoubleOrNull() ?: 0.0)
+                val totalStock = openingStock + receipts
+
+                val dipVal = dayConfig["dip_$pKey"]
+                    ?: if (isSameProduct(product, "MS")) dayConfig["dip_ms"]
+                       else if (isSameProduct(product, "HSD")) dayConfig["dip_hsd"]
+                       else null
+                val densityVal = productPumpData?.density?.takeIf { it > 0.0 }?.toString()
+                    ?: dayConfig["density_$pKey"]
+                    ?: if (isSameProduct(product, "MS")) dayConfig["density_ms"]
+                       else if (isSameProduct(product, "HSD")) dayConfig["density_hsd"]
+                       else null
+
+                val productDip = dipVal ?: densityVal ?: "--"
+
                 ProductDayData(
                     productName = product,
                     rate = rate,
-                    openingStock = stock,
+                    openingStock = openingStock,
+                    receipts = receipts,
+                    totalStock = totalStock,
+                    productDip = productDip,
                     totalOpening = productTotalOpening,
                     totalClosing = productTotalClosing,
                     salesLitres = productSalesLitres,
@@ -165,6 +218,7 @@ fun DailySalesReportScreen(
                     nozzleDetails = productNozzleDetailsList
                 )
             }
+
 
             DailySalesReportData(
                 date = dateStr,
@@ -195,7 +249,7 @@ fun DailySalesReportScreen(
                 title = {
                     Column {
                         Text(
-                            text = LanguageManager.translate("Monthly Daily Sales Report", "मासिक दैनिक बिक्री रिपोर्ट"),
+                            text = LanguageManager.translate("Monthly Sales Purchase Report", "मासिक बिक्री और खरीद रिपोर्ट"),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
@@ -223,6 +277,7 @@ fun DailySalesReportScreen(
                                 selectedMonthName,
                                 selectedYear,
                                 dailyDataList,
+                                allTtEntries = allTtEntries,
                                 isShare = true
                             )
                         },
@@ -349,6 +404,7 @@ fun DailySalesReportScreen(
                                 rowProducts.forEach { product ->
                                     val totalLitres = dailyDataList.sumOf { day -> day.products.find { it.productName == product }?.salesLitres ?: 0.0 }
                                     val totalAmount = dailyDataList.sumOf { day -> day.products.find { it.productName == product }?.salesAmount ?: 0.0 }
+                                    val totalReceipts = dailyDataList.sumOf { day -> day.products.find { it.productName == product }?.receipts ?: 0.0 }
                                     
                                     Card(
                                         modifier = Modifier.weight(1f),
@@ -362,12 +418,17 @@ fun DailySalesReportScreen(
                                             )
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L",
-                                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                                                text = "Sales: ${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Text(
+                                                text = "Receipts: ${String.format(Locale.getDefault(), "%,.1f", totalReceipts)} L",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = Color(0xFF2E7D32)
                                             )
                                             Text(
                                                 text = "₹${String.format(Locale.getDefault(), "%,.2f", totalAmount)}",
-                                                style = MaterialTheme.typography.bodySmall,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
@@ -585,8 +646,10 @@ fun DailySalesReportScreen(
                                                 )
 
                                                 DetailRow("Total Nozzles", "${product.nozzleDetails.size}", isBold = true)
-                                                DetailRow("Opening Reading", String.format(Locale.getDefault(), "%,.1f", product.totalOpening))
-                                                DetailRow("Closing Reading", String.format(Locale.getDefault(), "%,.1f", product.totalClosing))
+                                                if (product.productDip != "--") DetailRow("Product Dip", product.productDip)
+                                                if (product.openingStock > 0) DetailRow("Opening Stock", "${String.format(Locale.getDefault(), "%,.1f", product.openingStock)} L")
+                                                if (product.receipts > 0) DetailRow("Receipts", "${String.format(Locale.getDefault(), "%,.1f", product.receipts)} L")
+                                                if (product.totalStock > 0) DetailRow("Total Stock", "${String.format(Locale.getDefault(), "%,.1f", product.totalStock)} L")
                                                 DetailRow("Net Sales Qty", "${String.format(Locale.getDefault(), "%,.1f", product.salesLitres)} L")
                                                 DetailRow("Rate/Litre", "₹${String.format(Locale.getDefault(), "%,.2f", product.rate)}")
                                                 DetailRow("Sales Amount", "₹${String.format(Locale.getDefault(), "%,.2f", product.salesAmount)}", isPrimary = true)
@@ -656,7 +719,7 @@ fun DailySalesReportScreen(
                                 }
 
                                 // Nozzle Readings Breakdown (Table style)
-                                val allNozzles = dailyData.products.flatMap { it.nozzleDetails }
+                                val allNozzles = dailyData.products.flatMap { it.nozzleDetails }.sortedBy { extractNozzleNumber(it.label) }
                                 if (allNozzles.isNotEmpty()) {
                                     Column {
                                         Text(
@@ -768,6 +831,11 @@ private fun DetailRow(
     }
 }
 
+fun extractNozzleNumber(label: String): Int {
+    val match = Regex("\\d+").find(label)
+    return match?.value?.toIntOrNull() ?: Int.MAX_VALUE
+}
+
 // Data models used specifically for daily report
 data class DailySalesReportData(
     val date: String,
@@ -783,6 +851,9 @@ data class ProductDayData(
     val productName: String,
     val rate: Double,
     val openingStock: Double,
+    val receipts: Double = 0.0,
+    val totalStock: Double = 0.0,
+    val productDip: String = "--",
     val totalOpening: Double = 0.0,
     val totalClosing: Double = 0.0,
     val salesLitres: Double,
@@ -805,6 +876,7 @@ private fun printMonthlySalesReportPdf(
     monthName: String,
     year: Int,
     dailyRecords: List<DailySalesReportData>,
+    allTtEntries: List<com.example.database.TtReceiptEntry> = emptyList(),
     isShare: Boolean = false
 ) {
     val webView = WebView(context)
@@ -812,9 +884,6 @@ private fun printMonthlySalesReportPdf(
 
     // Get all unique products present in the records
     val allProducts = dailyRecords.flatMap { day -> day.products.map { it.productName } }.distinct()
-    val monthlyTotalCashSubmitted = dailyRecords.sumOf { it.cashSubmitted }
-    val monthlyTotalActualCashCollected = dailyRecords.sumOf { it.actualCashCollected }
-    val monthlyTotalCashCollected = dailyRecords.sumOf { it.totalCashCollected }
 
     htmlBuilder.append("""
         <!DOCTYPE html>
@@ -823,30 +892,31 @@ private fun printMonthlySalesReportPdf(
             <style>
                 @page {
                     size: landscape;
-                    margin: 4mm 6mm;
+                    margin: 3mm 5mm;
                 }
                 body {
                     font-family: Arial, sans-serif;
                     margin: 0;
                     color: #222;
-                    font-size: 8px;
+                    font-size: 8.5px;
                     line-height: 1.15;
                 }
                 .page {
                     page-break-after: always;
+                    page-break-inside: avoid;
                 }
                 .page:last-child {
                     page-break-after: avoid;
                 }
                 .header {
                     text-align: center;
-                    border-bottom: 2px solid #333;
-                    padding-bottom: 3px;
-                    margin-bottom: 6px;
+                    border-bottom: 1.5px solid #333;
+                    padding-bottom: 2px;
+                    margin-bottom: 4px;
                 }
                 .header h1 {
                     margin: 0 0 1px 0;
-                    font-size: 11px;
+                    font-size: 12px;
                     text-transform: uppercase;
                     color: #111;
                 }
@@ -859,9 +929,9 @@ private fun printMonthlySalesReportPdf(
                     font-size: 9px;
                     font-weight: bold;
                     text-transform: uppercase;
-                    margin: 3px 0 5px 0;
+                    margin: 2px 0 4px 0;
                     color: #1a5f7a;
-                    border-bottom: 2px solid #1a5f7a;
+                    border-bottom: 1.5px solid #1a5f7a;
                     padding-bottom: 1px;
                 }
                 table {
@@ -871,7 +941,7 @@ private fun printMonthlySalesReportPdf(
                 }
                 th, td {
                     border: 1px solid #bbb;
-                    padding: 2px 3px;
+                    padding: 1.5px 3px;
                     text-align: left;
                     vertical-align: middle;
                 }
@@ -879,12 +949,12 @@ private fun printMonthlySalesReportPdf(
                     background-color: #f5f5f5;
                     font-weight: bold;
                     color: #111;
-                    font-size: 8px;
+                    font-size: 8.5px;
                 }
                 .num {
                     text-align: right;
                     font-family: 'Courier New', Courier, monospace;
-                    font-size: 8px;
+                    font-size: 8.5px;
                 }
                 .total-row {
                     font-weight: bold;
@@ -895,49 +965,56 @@ private fun printMonthlySalesReportPdf(
         <body>
     """.trimIndent())
 
-    // Generate a sheet for each product
+    // Generate paired 2-page sheets for each product (Page 1 = Sales Sheet, Page 2 = Purchase Sheet)
     allProducts.forEach { product ->
         val productNozzleLabels = dailyRecords.flatMap { rec ->
             rec.products.find { it.productName == product }?.nozzleDetails?.map { it.label } ?: emptyList()
-        }.distinct().sorted()
+        }.distinct().sortedBy { extractNozzleNumber(it) }
 
         val nozzleHeaderHtml = if (productNozzleLabels.isNotEmpty()) {
-            val widthPerNozzle = 25.0 / productNozzleLabels.size
+            val widthPerNozzle = 24.0 / productNozzleLabels.size
             productNozzleLabels.joinToString("") { label ->
                 """<th style="width: ${String.format(Locale.US, "%.2f", widthPerNozzle)}%; text-align: right;">$label (Op)</th>"""
             }
         } else {
-            """<th style="width: 25%;">Nozzle Opening Readings</th>"""
+            """<th style="width: 24%;">Nozzle Opening Readings</th>"""
         }
 
+        // PAGE 1 FOR PRODUCT: MONTHLY SALES SHEET
         htmlBuilder.append("""
             <div class="page">
                 <div class="header">
                     <h1>D R INAMDAR PETROLEUM</h1>
-                    <p>Monthly Daily Sales & Stock Report &mdash; <strong>$monthName $year</strong></p>
-                    <p>Product: <strong>$product</strong> | Generated on: ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.getDefault()).format(Date())}</p>
+                    <p>Monthly Sales Purchase Report &mdash; <strong>$monthName $year</strong></p>
+                    <p>Product: <strong>$product</strong> | Page 1 (MONTHLY SALES SHEET)</p>
                 </div>
                 
-                <div class="title-sect">$product &mdash; DAILY SALES & STOCK SHEET</div>
+                <div class="title-sect">$product &mdash; MONTHLY SALES SHEET</div>
                 
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 10%;">Date</th>
-                            <th style="width: 10%; text-align: right;">Total Opening</th>
-                            <th style="width: 10%; text-align: right;">Total Closing</th>
+                            <th style="width: 8%;">Date</th>
+                            <th style="width: 6%; text-align: right;">Dip</th>
+                            <th style="width: 8%; text-align: right;">Op. Stock</th>
+                            <th style="width: 8%; text-align: right;">Receipts</th>
+                            <th style="width: 9%; text-align: right;">Total Stock</th>
                             $nozzleHeaderHtml
-                            <th style="width: 10%; text-align: right;">Sales (L)</th>
-                            <th style="width: 8%; text-align: right;">Test (L)</th>
+                            <th style="width: 7%; text-align: right;">Test (L)</th>
+                            <th style="width: 9%; text-align: right;">Daily Sales</th>
                             <th style="width: 8%; text-align: right;">Rate (₹)</th>
-                            <th style="width: 12%; text-align: right;">Amount (₹)</th>
+                            <th style="width: 13%; text-align: right;">Total Amt (₹)</th>
                         </tr>
                     </thead>
                     <tbody>
         """.trimIndent())
 
         var totalLitres = 0.0
+        var totalTesting = 0.0
         var totalAmt = 0.0
+        var totalOpStock = 0.0
+        var totalReceiptsSum = 0.0
+        var totalStockSum = 0.0
 
         dailyRecords.forEach { rec ->
             val pData = rec.products.find { it.productName == product }
@@ -953,15 +1030,22 @@ private fun printMonthlySalesReportPdf(
 
             if (pData != null) {
                 totalLitres += pData.salesLitres
+                totalTesting += pData.testingLitres
                 totalAmt += pData.salesAmount
+                totalOpStock += pData.openingStock
+                totalReceiptsSum += pData.receipts
+                totalStockSum += pData.totalStock
+
                 htmlBuilder.append("""
                     <tr>
                         <td><strong>${rec.date}</strong></td>
-                        <td class="num">${formatDouble(pData.totalOpening)}</td>
-                        <td class="num">${formatDouble(pData.totalClosing)}</td>
+                        <td class="num">--</td>
+                        <td class="num">${if (pData.openingStock > 0) String.format(Locale.getDefault(), "%,.1f", pData.openingStock) else "--"}</td>
+                        <td class="num">${if (pData.receipts > 0) String.format(Locale.getDefault(), "%,.1f", pData.receipts) else "--"}</td>
+                        <td class="num">${if (pData.totalStock > 0) String.format(Locale.getDefault(), "%,.1f", pData.totalStock) else "--"}</td>
                         $nozzleCellsHtml
-                        <td class="num" style="font-weight:bold;">${if (pData.salesLitres > 0) String.format(Locale.getDefault(), "%,.1f", pData.salesLitres) else "--"}</td>
                         <td class="num" style="color:#c62828;">${if (pData.testingLitres > 0) String.format(Locale.getDefault(), "%,.1f", pData.testingLitres) else "--"}</td>
+                        <td class="num" style="font-weight:bold;">${if (pData.salesLitres > 0) String.format(Locale.getDefault(), "%,.1f", pData.salesLitres) else "--"}</td>
                         <td class="num">${if (pData.rate > 0) String.format(Locale.getDefault(), "%,.2f", pData.rate) else "--"}</td>
                         <td class="num" style="font-weight:bold;">${if (pData.salesAmount > 0) "₹" + String.format(Locale.getDefault(), "%,.2f", pData.salesAmount) else "--"}</td>
                     </tr>
@@ -971,6 +1055,9 @@ private fun printMonthlySalesReportPdf(
                 htmlBuilder.append("""
                     <tr>
                         <td><strong>${rec.date}</strong></td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
                         <td>--</td>
                         $emptyNozzleCells
                         <td>--</td>
@@ -982,123 +1069,129 @@ private fun printMonthlySalesReportPdf(
             }
         }
 
-        val colSpan = if (productNozzleLabels.isNotEmpty()) 3 + productNozzleLabels.size else 4
+        val colSpan = productNozzleLabels.size.coerceAtLeast(1)
         htmlBuilder.append("""
                         <tr class="total-row">
                             <td>TOTALS</td>
+                            <td>&mdash;</td>
+                            <td class="num" style="font-size: 10px;">${if (totalOpStock > 0) String.format(Locale.getDefault(), "%,.1f", totalOpStock) + " L" else "--"}</td>
+                            <td class="num" style="font-size: 10px;">${if (totalReceiptsSum > 0) String.format(Locale.getDefault(), "%,.1f", totalReceiptsSum) + " L" else "--"}</td>
+                            <td class="num" style="font-size: 10px;">${if (totalStockSum > 0) String.format(Locale.getDefault(), "%,.1f", totalStockSum) + " L" else "--"}</td>
                             <td colspan="$colSpan">&mdash;</td>
-                            <td class="num" style="font-size: 10px;">${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L</td>
+                            <td class="num" style="font-size: 10px; color:#c62828;">${if (totalTesting > 0) String.format(Locale.getDefault(), "%,.1f", totalTesting) + " L" else "--"}</td>
+                            <td class="num" style="font-size: 11px; font-weight: bold;">${String.format(Locale.getDefault(), "%,.1f", totalLitres)} L</td>
                             <td>&mdash;</td>
-                            <td>&mdash;</td>
-                            <td class="num" style="font-size: 10px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalAmt)}</td>
+                            <td class="num" style="font-size: 11px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", totalAmt)}</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         """.trimIndent())
-    }
 
-    // SHEET: STATION CONSOLIDATED FUEL SUMMARY
-    htmlBuilder.append("""
-        <div class="page">
-            <div class="header">
-                <h1>D R INAMDAR PETROLEUM</h1>
-                <p>Monthly Station Consolidated Fuel Summary &mdash; <strong>$monthName $year</strong></p>
-            </div>
-            <div class="title-sect">FUEL-WISE SALES RECONCILIATION TOTALS</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Product Identity</th>
-                        <th style="text-align: right;">Total Quantity Sold (L)</th>
-                        <th style="text-align: right;">Total Revenue Earned (₹)</th>
-                    </tr>
-                </thead>
-                <tbody>
-    """.trimIndent())
+        // PAGE 2 FOR PRODUCT: MONTHLY PURCHASE SHEET
+        val isMs = isSameProduct(product, "MS") || isSameProduct(product, "Petrol")
+        val isHsd = isSameProduct(product, "HSD") || isSameProduct(product, "Diesel")
 
-    var grandStationLitres = 0.0
-    var grandStationRevenue = 0.0
+        val productTtItems = mutableListOf<TtPurchaseLineItem>()
+        allTtEntries.forEach { entry ->
+            val monthStr = String.format(Locale.US, "%02d", monthName.let {
+                val monthNames = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+                monthNames.indexOf(it) + 1
+            })
+            val suffix = "-$monthStr-$year"
+            if (entry.date.endsWith(suffix) || entry.date.endsWith("-$year")) {
+                if (isMs) {
+                    val qty = if (entry.msInvoiceQuantity > 0) entry.msInvoiceQuantity 
+                             else if (entry.msPostDecantationStock > 0) (entry.msPostDecantationStock - entry.msPreDecantationStock).coerceAtLeast(0.0) 
+                             else 0.0
+                    val amt = if (entry.msInvoiceAmount > 0) entry.msInvoiceAmount else if (qty > 0) entry.invoiceAmount else 0.0
+                    if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.msShortage, amt, entry.timestamp))
+                    }
+                } else if (isHsd) {
+                    val qty = if (entry.hsdInvoiceQuantity > 0) entry.hsdInvoiceQuantity 
+                             else if (entry.hsdPostDecantationStock > 0) (entry.hsdPostDecantationStock - entry.hsdPreDecantationStock).coerceAtLeast(0.0) 
+                             else 0.0
+                    val amt = if (entry.hsdInvoiceAmount > 0) entry.hsdInvoiceAmount else if (qty > 0) entry.invoiceAmount else 0.0
+                    if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.hsdShortage, amt, entry.timestamp))
+                    }
+                } else if (entry.extraProductName != null && isSameProduct(product, entry.extraProductName)) {
+                    val qty = entry.extraInvoiceQuantity
+                    val amt = entry.extraInvoiceAmount
+                    if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.extraShortage, amt, entry.timestamp))
+                    }
+                } else {
+                    if (entry.invoiceAmount > 0 || entry.invoiceNumber.isNotBlank()) {
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, 0.0, 0.0, entry.invoiceAmount, entry.timestamp))
+                    }
+                }
+            }
+        }
 
-    allProducts.forEach { product ->
-        val prodTotalLitres = dailyRecords.sumOf { day -> day.products.find { it.productName == product }?.salesLitres ?: 0.0 }
-        val prodTotalRevenue = dailyRecords.sumOf { day -> day.products.find { it.productName == product }?.salesAmount ?: 0.0 }
-        grandStationLitres += prodTotalLitres
-        grandStationRevenue += prodTotalRevenue
+        val purchaseRowsHtml = if (productTtItems.isEmpty()) {
+            "<tr><td colspan='5' style='text-align: center; color: #888; padding: 12px;'>No purchase records for $product during $monthName $year</td></tr>"
+        } else {
+            productTtItems.joinToString("") { item ->
+                val qtyStr = if (item.quantityLitres > 0) "${String.format(Locale.getDefault(), "%,.1f", item.quantityLitres)} L" else "--"
+                val shortStr = if (item.shortageLitres != 0.0) "${formatDouble(item.shortageLitres)}" else "--"
+                val amtStr = if (item.invoiceAmount > 0) "₹${String.format(Locale.getDefault(), "%,.2f", item.invoiceAmount)}" else "--"
+                """
+                <tr>
+                    <td style="padding: 8px; font-weight: bold;">${item.date}</td>
+                    <td class="num" style="font-weight: bold; color: #1a5f7a;">$qtyStr</td>
+                    <td class="num" style="color: ${if (item.shortageLitres > 0) "#c62828" else "#2e7d32"}; font-weight: bold;">$shortStr</td>
+                    <td style="text-align: center;">${item.invoiceNumber.ifEmpty { "--" }}</td>
+                    <td class="num" style="font-weight: bold; color: #2e7d32;">$amtStr</td>
+                </tr>
+                """.trimIndent()
+            }
+        }
+
+        val totalPurchaseQty = productTtItems.sumOf { it.quantityLitres }
+        val totalPurchaseShort = productTtItems.sumOf { it.shortageLitres }
+        val totalPurchaseAmt = productTtItems.sumOf { it.invoiceAmount }
 
         htmlBuilder.append("""
-            <tr>
-                <td><strong>$product</strong></td>
-                <td class="num">${String.format(Locale.getDefault(), "%,.1f", prodTotalLitres)} L</td>
-                <td class="num">₹${String.format(Locale.getDefault(), "%,.2f", prodTotalRevenue)}</td>
-            </tr>
-        """.trimIndent())
-    }
-
-    htmlBuilder.append("""
-            <tr class="total-row" style="background-color: #f8fafc;">
-                <td><strong>STATION TOTALS (ALL PRODUCTS)</strong></td>
-                <td class="num" style="font-size: 11px;">${String.format(Locale.getDefault(), "%,.1f", grandStationLitres)} L</td>
-                <td class="num" style="font-size: 11px; color: #1a5f7a;">₹${String.format(Locale.getDefault(), "%,.2f", grandStationRevenue)}</td>
-            </tr>
-        </tbody>
-    </table>
-    </div>
-    """.trimIndent())
-
-    // Cash Sheet
-    val monthlyTotalKharch = dailyRecords.sumOf { it.totalKharch }
-    val monthlyTotalUdhar = dailyRecords.sumOf { it.totalUdhar }
-
-    htmlBuilder.append("""
             <div class="page">
                 <div class="header">
                     <h1>D R INAMDAR PETROLEUM</h1>
-                    <p>Monthly Daily Sales & Stock Report &mdash; <strong>$monthName $year</strong></p>
-                    <p>Generated on: ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.getDefault()).format(Date())}</p>
+                    <p>Monthly Sales Purchase Report &mdash; <strong>$monthName $year</strong></p>
+                    <p>Product: <strong>$product</strong> | Page 2 (MONTHLY PURCHASE SHEET)</p>
                 </div>
                 
-                <div class="title-sect" style="color: #7209b7; border-bottom: 2px solid #7209b7;">CASH FLOW & COLLECTION SUMMARY SHEET</div>
+                <div class="title-sect" style="color: #2e7d32; border-bottom-color: #2e7d32;">$product &mdash; MONTHLY PURCHASE SHEET</div>
                 
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 20%;">Date</th>
-                            <th style="width: 15%; text-align: right;">Cash Sub. (₹)</th>
-                            <th style="width: 15%; text-align: right;">Actual Cash (₹)</th>
-                            <th style="width: 15%; text-align: right;">Kharch (₹)</th>
-                            <th style="width: 15%; text-align: right;">Udhar (₹)</th>
-                            <th style="width: 20%; text-align: right; background-color: #faf5ff; color: #7209b7;">Total Cash (₹)</th>
+                            <th style="width: 15%;">Date</th>
+                            <th style="width: 20%; text-align: right;">Product Quantity (L)</th>
+                            <th style="width: 15%; text-align: right;">Shortage (L)</th>
+                            <th style="width: 20%; text-align: center;">Invoice Number</th>
+                            <th style="width: 30%; text-align: right;">Invoice Amount (₹)</th>
                         </tr>
                     </thead>
                     <tbody>
-    """.trimIndent())
-
-    dailyRecords.forEach { rec ->
-        htmlBuilder.append("""
-            <tr>
-                <td><strong>${rec.date}</strong></td>
-                <td class="num">${if (rec.cashSubmitted > 0) String.format(Locale.getDefault(), "%,.2f", rec.cashSubmitted) else "--"}</td>
-                <td class="num">${if (rec.actualCashCollected > 0) String.format(Locale.getDefault(), "%,.2f", rec.actualCashCollected) else "--"}</td>
-                <td class="num" style="color:#c62828;">${if (rec.totalKharch > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalKharch) else "--"}</td>
-                <td class="num" style="color:#e65100;">${if (rec.totalUdhar > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalUdhar) else "--"}</td>
-                <td class="num" style="font-weight: bold; background-color: #faf5ff; color: #7209b7;">${if (rec.totalCashCollected > 0) String.format(Locale.getDefault(), "%,.2f", rec.totalCashCollected) else "--"}</td>
-            </tr>
-        """.trimIndent())
-    }
-
-    htmlBuilder.append("""
-                        <tr class="total-row">
-                            <td>TOTALS</td>
-                            <td class="num" style="font-size: 9px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashSubmitted)}</td>
-                            <td class="num" style="font-size: 9px; font-weight: bold;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalActualCashCollected)}</td>
-                            <td class="num" style="font-size: 9px; font-weight: bold; color:#c62828;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalKharch)}</td>
-                            <td class="num" style="font-size: 9px; font-weight: bold; color:#e65100;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalUdhar)}</td>
-                            <td class="num" style="font-size: 9px; font-weight: bold; background-color: #faf5ff; color: #7209b7;">₹${String.format(Locale.getDefault(), "%,.2f", monthlyTotalCashCollected)}</td>
+                        $purchaseRowsHtml
+                        <tr class="total-row" style="background-color: #e8f5e9;">
+                            <td style="color: #2e7d32;">MONTHLY TOTALS</td>
+                            <td class="num" style="font-size: 11px; font-weight: bold; color: #1a5f7a;">${if (totalPurchaseQty > 0) String.format(Locale.getDefault(), "%,.1f", totalPurchaseQty) + " L" else "--"}</td>
+                            <td class="num" style="font-size: 11px; font-weight: bold; color: ${if (totalPurchaseShort > 0) "#c62828" else "#2e7d32"};">${if (totalPurchaseShort != 0.0) formatDouble(totalPurchaseShort) else "--"}</td>
+                            <td style="text-align: center;">&mdash;</td>
+                            <td class="num" style="font-size: 11px; font-weight: bold; color: #2e7d32;">₹${String.format(Locale.getDefault(), "%,.2f", totalPurchaseAmt)}</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+        """.trimIndent())
+    }
+
+
+
+
+    htmlBuilder.append("""
         </body>
         </html>
     """.trimIndent())

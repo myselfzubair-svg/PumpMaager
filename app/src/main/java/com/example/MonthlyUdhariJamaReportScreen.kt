@@ -87,8 +87,8 @@ fun MonthlyUdhariJamaReportScreen(
         resetAndBack()
     }
 
-    // Load audits from Cloud
-    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    // Load data from Cloud
+    val allRecoveriesState = com.example.database.SupabaseRepository.getRecoveryEntriesFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -105,27 +105,24 @@ fun MonthlyUdhariJamaReportScreen(
         monthNamesHi[selectedMonth]
     )
 
-    // Parse all recoveries from audits
-    val parsedRecoveries = remember(allAuditsState.value, selectedMonth, selectedYear) {
+    // Parse all recoveries from DB entries
+    val parsedRecoveries = remember(allRecoveriesState.value, selectedMonth, selectedYear) {
         val list = mutableListOf<RecoveryRecord>()
         val monthStr = String.format(Locale.getDefault(), "%02d", selectedMonth + 1)
         val yearStr = selectedYear.toString()
         val suffix = "-$monthStr-$yearStr"
 
-        allAuditsState.value.forEach { audit ->
-            if (audit.date.endsWith(suffix)) {
-                val extracted = parseDetailedRecoveries(audit.summaryText)
-                extracted.forEach { (desc, amt) ->
-                    list.add(
-                        RecoveryRecord(
-                            date = audit.date,
-                            description = desc,
-                            amount = amt,
-                            caName = audit.caName,
-                            auditId = audit.id ?: 0
-                        )
+        allRecoveriesState.value.forEach { entry ->
+            if (entry.date.endsWith(suffix)) {
+                list.add(
+                    RecoveryRecord(
+                        date = entry.date,
+                        description = "${entry.party}: ${entry.description}",
+                        amount = entry.amount,
+                        caName = entry.caName,
+                        auditId = entry.id?.toInt() ?: 0
                     )
-                }
+                )
             }
         }
         // Sort chronologically by parsing date dd-MM-yyyy
@@ -434,7 +431,7 @@ fun MonthlyUdhariJamaReportScreen(
 
             // SEARCH BAR
             item {
-                OutlinedTextField(
+                VoiceOutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier

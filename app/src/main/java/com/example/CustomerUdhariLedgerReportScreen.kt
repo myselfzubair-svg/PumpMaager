@@ -54,7 +54,8 @@ data class CustomerTransaction(
     val amount: Double,
     val caName: String,
     val auditId: Int,
-    val timestamp: Long
+    val timestamp: Long,
+    val description: String = ""
 )
 
 enum class TransactionType {
@@ -116,7 +117,8 @@ fun CustomerUdhariLedgerReportScreen(
                         amount = entry.amount,
                         caName = entry.caName,
                         auditId = entry.id?.toInt() ?: 0,
-                        timestamp = entry.timestamp
+                        timestamp = entry.timestamp,
+                        description = entry.description
                     )
                 )
             }
@@ -133,7 +135,8 @@ fun CustomerUdhariLedgerReportScreen(
                         amount = entry.amount,
                         caName = entry.caName,
                         auditId = entry.id?.toInt() ?: 0,
-                        timestamp = entry.timestamp
+                        timestamp = entry.timestamp,
+                        description = entry.description
                     )
                 )
             }
@@ -309,7 +312,7 @@ fun CustomerUdhariLedgerReportScreen(
                     modifier = Modifier.padding(vertical = 12.dp)
                 )
 
-                OutlinedTextField(
+                VoiceOutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     placeholder = { Text(LanguageManager.translate("Type customer name...", "ग्राहक का नाम टाइप करें...")) },
@@ -617,20 +620,14 @@ fun CustomerUdhariLedgerReportScreen(
                                     }
 
                                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = if (tx.type == TransactionType.GIVEN) {
-                                                    LanguageManager.translate("Udhari Given", "उधार दिया")
-                                                } else {
-                                                    LanguageManager.translate("Udhari Recovered", "उधारी जमा")
-                                                },
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = if (tx.type == TransactionType.GIVEN) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
-                                            )
-                                        }
+                                        Text(
+                                            text = tx.description.ifEmpty { 
+                                                if (tx.type == TransactionType.GIVEN) LanguageManager.translate("Udhari Given", "उधार दिया")
+                                                else LanguageManager.translate("Udhari Recovered", "उधारी जमा")
+                                            },
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = if (tx.type == TransactionType.GIVEN) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+                                        )
                                         Text(
                                             text = LanguageManager.translate(
                                                 "Recorded on ${tx.date} by ${tx.caName}",
@@ -750,7 +747,9 @@ private fun printCustomerLedgerPdf(
     val detailedRowsHtml = transactions.joinToString("") { tx ->
         val typeColor = if (tx.type == TransactionType.GIVEN) "#c62828" else "#2e7d32"
         val typeSign = if (tx.type == TransactionType.GIVEN) "-" else "+"
-        val typeLabel = if (tx.type == TransactionType.GIVEN) "Udhari Given" else "Udhari Recovered"
+        val typeLabel = tx.description.ifEmpty { 
+            if (tx.type == TransactionType.GIVEN) "Udhari Given" else "Udhari Recovered"
+        }
         
         """
         <tr>

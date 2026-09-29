@@ -104,9 +104,11 @@ fun ModuleSelectionScreen(
                     ModuleGridCard("Save View", "Save current view settings", Icons.Default.Save, Color(0xFF8B5CF6)) {}
                 }
             }
-            if (isManagerOrAdmin) {
+            if (isAdmin) {
                 item {
-                    ModuleGridCard("Saved Reports", "Access your saved reports", Icons.Default.Folder, Color(0xFFF59E0B)) {}
+                    ModuleGridCard("Saved Reports", "Access your saved reports", Icons.Default.Folder, Color(0xFFF59E0B)) {
+                        onNavigateToHistory()
+                    }
                 }
             }
             // "Add Staff" removed as per request - now in Quick Access only
