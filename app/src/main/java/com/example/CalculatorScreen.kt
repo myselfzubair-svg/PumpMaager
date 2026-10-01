@@ -3184,7 +3184,7 @@ fun CalculatorScreen(
                                         reportId = reportId,
                                         ownerAdminPhone = adminPhone,
                                         party = item.name,
-                                        description = "${item.product} (${formatDouble(item.litres)}L @ ₹${formatDouble(item.rate)}) ${item.description}",
+                                        description = "${if (item.receiptNo.isNotBlank()) "Rec: ${item.receiptNo} - " else ""}${item.product} (${formatDouble(item.litres)}L @ ₹${formatDouble(item.rate)}) ${item.description}",
                                         amount = item.amount,
                                         date = date,
                                         timestamp = sharedTimestamp,

@@ -87,8 +87,9 @@ fun MonthlyUdhariJamaReportScreen(
         resetAndBack()
     }
 
-    // Load data from Cloud
+    // Load recovery entries and audits from Cloud (combining table entries, manager reports, pump reports, and CA reports)
     val allRecoveriesState = com.example.database.SupabaseRepository.getRecoveryEntriesFlow(adminPhone).collectAsState(initial = emptyList())
+    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -105,13 +106,14 @@ fun MonthlyUdhariJamaReportScreen(
         monthNamesHi[selectedMonth]
     )
 
-    // Parse all recoveries from DB entries
-    val parsedRecoveries = remember(allRecoveriesState.value, selectedMonth, selectedYear) {
+    // Parse and combine all recoveries from table entries and audits (Manager reports, pump reports, CA reports)
+    val parsedRecoveries = remember(allRecoveriesState.value, allAuditsState.value, selectedMonth, selectedYear) {
         val list = mutableListOf<RecoveryRecord>()
         val monthStr = String.format(Locale.getDefault(), "%02d", selectedMonth + 1)
         val yearStr = selectedYear.toString()
         val suffix = "-$monthStr-$yearStr"
 
+        // 1. From udhari_jama table entries
         allRecoveriesState.value.forEach { entry ->
             if (entry.date.endsWith(suffix)) {
                 list.add(
@@ -123,6 +125,26 @@ fun MonthlyUdhariJamaReportScreen(
                         auditId = entry.id?.toInt() ?: 0
                     )
                 )
+            }
+        }
+
+        // 2. From saved audits (Manager reports, pump reports, CA reports)
+        allAuditsState.value.forEach { audit ->
+            if (audit.date.endsWith(suffix)) {
+                val extracted = parseDetailedRecoveries(audit.summaryText)
+                extracted.forEach { (party, amt) ->
+                    if (list.none { it.date == audit.date && it.description.contains(party, ignoreCase = true) && Math.abs(it.amount - amt) < 0.01 }) {
+                        list.add(
+                            RecoveryRecord(
+                                date = audit.date,
+                                description = "$party: Audit Entry",
+                                amount = amt,
+                                caName = audit.caName,
+                                auditId = audit.id ?: 0
+                            )
+                        )
+                    }
+                }
             }
         }
         // Sort chronologically by parsing date dd-MM-yyyy

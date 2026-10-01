@@ -88,12 +88,14 @@ fun CashToBankScreen(
             
             // Fetch direct handover sums from the Audit reports instead of the summary table
             val records = SupabaseRepository.getDailyCashHandoverFromAudits(adminPhone, settledAnchorTimestamp, upToNow)
+            val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date())
 
             withContext(Dispatchers.Main) {
                 udhariNamesList = names
                 latestReport = latest
                 lastSettledReport = lastSettled
-                dailyCashRecords = records.filter { it.timestamp > latestReportTimestamp }
+                // Exclude today's date cash so only cash till yesterday is displayed as available cash
+                dailyCashRecords = records.filter { it.timestamp > latestReportTimestamp && it.date != todayStr }
                 
                 openingBalance = if (latest != null && !latest.isSettled) {
                     latest.manualDifference

@@ -88,8 +88,10 @@ fun MonthlyExpensesReportScreen(
         resetAndBack()
     }
 
-    // Load audits from Cloud
+    // Load expense entries, audits, and manager transactions from Cloud (combining table entries, manager reports, pump reports, and CA reports)
+    val allExpensesState = com.example.database.SupabaseRepository.getExpenseEntriesFlow(adminPhone).collectAsState(initial = emptyList())
     val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    val allManagerTxsState = com.example.database.SupabaseRepository.getManagerTransactionsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -106,24 +108,59 @@ fun MonthlyExpensesReportScreen(
         monthNamesHi[selectedMonth]
     )
 
-    // Parse all expenses from audits in parallel/cached
-    val parsedExpenses = remember(allAuditsState.value, selectedMonth, selectedYear) {
+    // Parse and combine all expenses from table entries, audits, and manager report transactions
+    val parsedExpenses = remember(allExpensesState.value, allAuditsState.value, allManagerTxsState.value, selectedMonth, selectedYear) {
         val list = mutableListOf<ExpenseRecord>()
         val monthStr = String.format(Locale.getDefault(), "%02d", selectedMonth + 1)
         val yearStr = selectedYear.toString()
         val suffix = "-$monthStr-$yearStr"
 
+        // 1. From expense table entries
+        allExpensesState.value.forEach { entry ->
+            if (entry.date.endsWith(suffix)) {
+                list.add(
+                    ExpenseRecord(
+                        date = entry.date,
+                        description = entry.description,
+                        amount = entry.amount,
+                        caName = entry.caName,
+                        auditId = entry.id?.toInt() ?: 0
+                    )
+                )
+            }
+        }
+
+        // 2. From saved audits (Manager reports, pump reports, CA reports)
         allAuditsState.value.forEach { audit ->
             if (audit.date.endsWith(suffix)) {
                 val extracted = parseDetailedExpenses(audit.summaryText)
                 extracted.forEach { (desc, amt) ->
+                    if (list.none { it.date == audit.date && it.description.equals(desc, ignoreCase = true) && Math.abs(it.amount - amt) < 0.01 }) {
+                        list.add(
+                            ExpenseRecord(
+                                date = audit.date,
+                                description = desc,
+                                amount = amt,
+                                caName = audit.caName,
+                                auditId = audit.id ?: 0
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. From manager transactions (Manager Report expenses: MANAGER_EXPENSE, SALON_EXPENSE)
+        allManagerTxsState.value.forEach { tx ->
+            if (tx.type in listOf("MANAGER_EXPENSE", "SALON_EXPENSE") && tx.date.endsWith(suffix)) {
+                if (list.none { it.date == tx.date && it.description.equals(tx.description ?: "", ignoreCase = true) && Math.abs(it.amount - tx.amount) < 0.01 }) {
                     list.add(
                         ExpenseRecord(
-                            date = audit.date,
-                            description = desc,
-                            amount = amt,
-                            caName = audit.caName,
-                            auditId = audit.id ?: 0
+                            date = tx.date,
+                            description = tx.description ?: "Manager Expense",
+                            amount = tx.amount,
+                            caName = "Manager",
+                            auditId = tx.id?.toInt() ?: 0
                         )
                     )
                 }
@@ -154,7 +191,6 @@ fun MonthlyExpensesReportScreen(
             }
         }
     }
-
     // Key stats
     val totalExpenses = remember(filteredExpenses) {
         filteredExpenses.sumOf { it.amount }

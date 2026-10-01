@@ -88,8 +88,9 @@ fun MonthlyCreditReportScreen(
         resetAndBack()
     }
 
-    // Load data from Cloud
+    // Load credit entries and audits from Cloud (combining table entries, manager reports, pump reports, and CA reports)
     val allCreditsState = com.example.database.SupabaseRepository.getCreditEntriesFlow(adminPhone).collectAsState(initial = emptyList())
+    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
 
     // Month List configuration
     val monthNamesEn = listOf(
@@ -106,13 +107,14 @@ fun MonthlyCreditReportScreen(
         monthNamesHi[selectedMonth]
     )
 
-    // Parse all credits from DB entries
-    val parsedCredits = remember(allCreditsState.value, selectedMonth, selectedYear) {
+    // Parse and combine all credits from table entries and audits (Manager reports, pump reports, CA reports)
+    val parsedCredits = remember(allCreditsState.value, allAuditsState.value, selectedMonth, selectedYear) {
         val list = mutableListOf<CreditRecord>()
         val monthStr = String.format(Locale.getDefault(), "%02d", selectedMonth + 1)
         val yearStr = selectedYear.toString()
         val suffix = "-$monthStr-$yearStr"
 
+        // 1. From udhari table entries
         allCreditsState.value.forEach { entry ->
             if (entry.date.endsWith(suffix)) {
                 list.add(
@@ -124,6 +126,26 @@ fun MonthlyCreditReportScreen(
                         auditId = entry.id?.toInt() ?: 0
                     )
                 )
+            }
+        }
+
+        // 2. From saved audits (Manager reports, pump reports, CA reports)
+        allAuditsState.value.forEach { audit ->
+            if (audit.date.endsWith(suffix)) {
+                val extracted = parseDetailedCredits(audit.summaryText)
+                extracted.forEach { (party, amt) ->
+                    if (list.none { it.date == audit.date && it.description.contains(party, ignoreCase = true) && Math.abs(it.amount - amt) < 0.01 }) {
+                        list.add(
+                            CreditRecord(
+                                date = audit.date,
+                                description = "$party: Audit Entry",
+                                amount = amt,
+                                caName = audit.caName,
+                                auditId = audit.id ?: 0
+                            )
+                        )
+                    }
+                }
             }
         }
         // Sort chronologically by parsing date dd-MM-yyyy
