@@ -81,10 +81,13 @@ data class DailyAuditSummary(
     val actualCashCollected: Double,
     val lineItems: List<com.example.database.AuditLineItem> = emptyList(),
     // Integrated Manager Report Fields
-    val managerReport: SavedAudit? = null,
-    val managerTransactions: List<com.example.database.ManagerTransaction> = emptyList(),
+    val managerReports: List<SavedAudit> = emptyList(),
+    val managerTransactionsMap: Map<String, List<com.example.database.ManagerTransaction>> = emptyMap(),
     val reconciledDates: String = ""
-)
+) {
+    val managerReport: SavedAudit? get() = managerReports.firstOrNull()
+    val managerTransactions: List<com.example.database.ManagerTransaction> get() = managerTransactionsMap.values.flatten()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,8 +115,8 @@ fun FullDayCalculatorScreen(
     var pumpName by remember { mutableStateOf("D R INAMDAR PETROLEUM") }
     var ttEntries by remember { mutableStateOf<List<TtReceiptEntry>>(emptyList()) }
     var allRegisteredNozzles by remember { mutableStateOf<List<com.example.database.RegisteredNozzle>>(emptyList()) }
-    var managerTransactionsForAudit by remember { mutableStateOf<List<com.example.database.ManagerTransaction>>(emptyList()) }
-    var managerReportForAudit by remember { mutableStateOf<SavedAudit?>(null) }
+    var managerTransactionsMapForAudit by remember { mutableStateOf<Map<String, List<com.example.database.ManagerTransaction>>>(emptyMap()) }
+    var managerReportsForAudit by remember { mutableStateOf<List<SavedAudit>>(emptyList()) }
 
     // 2. Fetch Data
     val allAudits: List<SavedAudit> by historyViewModel.allAudits.collectAsState(initial = emptyList())
@@ -157,25 +160,45 @@ fun FullDayCalculatorScreen(
             ttEntries = com.example.database.SupabaseRepository.getTtEntriesByDate(adminPhone, selectedAuditDate)
             allRegisteredNozzles = com.example.database.SupabaseRepository.getRegisteredNozzles(adminPhone)
 
-            // Finding the Manager's Report:
-            // 1. By exact date match
-            // 2. By reconciliation link from any CA shift of this day
-            val reportByDate = allAudits.find { it.date.trim() == selectedAuditDate.trim() && it.auditType == "Manager's Report" }
-            val reportByLink = if (reportByDate == null) {
-                val linkedId = filteredAudits.firstOrNull { it.reconciledInManagerReportId != null }?.reconciledInManagerReportId
-                if (linkedId != null) allAudits.find { it.reportId == linkedId } else null
-            } else null
+            // Finding all Manager's Reports for the selected date:
+            // 1. By445. By445. By445.
+            val reportsByDate = allAudits.filter { it.date.trim() == selectedAuditDate.trim() && it.auditType == "Manager's Report" }
             
-            val foundReport = reportByDate ?: reportByLink
-            
-            if (foundReport != null) {
-                val txs = com.example.database.SupabaseRepository.getManagerTransactionsByReportId(adminPhone, foundReport.reportId)
-                // Update both atomically to avoid inconsistent aggregateData
-                managerTransactionsForAudit = txs
-                managerReportForAudit = foundReport
+            val nextDayDateStr = try {
+                val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+                val d = sdf.parse(selectedAuditDate)
+                if (d != null) {
+                    val cal = Calendar.getInstance()
+                    cal.time = d
+                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                    sdf.format(cal.time)
+                } else null
+            } catch (e: Exception) { null }
+
+            val reportsByNextDay = if (reportsByDate.isEmpty() && nextDayDateStr != null) {
+                allAudits.filter { it.date.trim() == nextDayDateStr.trim() && it.auditType == "Manager's Report" }
+            } else emptyList()
+
+            val linkedIds = filteredAudits.mapNotNull { it.reconciledInManagerReportId }.toSet()
+            val reportsByLink = if (linkedIds.isNotEmpty()) {
+                allAudits.filter { it.reportId in linkedIds && it.auditType == "Manager's Report" }
+            } else emptyList()
+
+            val foundReports = (reportsByDate + reportsByNextDay + reportsByLink)
+                .distinctBy { it.reportId }
+                .sortedBy { it.timestamp }
+
+            if (foundReports.isNotEmpty()) {
+                val txMap = mutableMapOf<String, List<com.example.database.ManagerTransaction>>()
+                for (report in foundReports) {
+                    val txs = com.example.database.SupabaseRepository.getManagerTransactionsByReportId(adminPhone, report.reportId)
+                    txMap[report.reportId] = txs
+                }
+                managerTransactionsMapForAudit = txMap
+                managerReportsForAudit = foundReports
             } else {
-                managerReportForAudit = null
-                managerTransactionsForAudit = emptyList()
+                managerReportsForAudit = emptyList()
+                managerTransactionsMapForAudit = emptyMap()
             }
         }
     }
@@ -215,7 +238,7 @@ fun FullDayCalculatorScreen(
         }.sortedBy { extractNozzleNumber(it.label) }
     }
 
-    val aggregateData = remember(filteredAudits, allAuditLineItems, selectedAuditDate, productConfigMap.toMap(), consolidatedNozzles, managerReportForAudit, managerTransactionsForAudit) {
+    val aggregateData = remember(filteredAudits, allAuditLineItems, selectedAuditDate, productConfigMap.toMap(), consolidatedNozzles, managerReportsForAudit, managerTransactionsMapForAudit) {
         var totalPhonePe = 0.0
         var totalCards = 0.0
         var totalCashSubmitted = 0.0
@@ -288,8 +311,8 @@ fun FullDayCalculatorScreen(
             cashSubmitted = totalCashSubmitted,
             actualCashCollected = totalActualCashCollected,
             lineItems = lineItemsToday,
-            managerReport = managerReportForAudit,
-            managerTransactions = managerTransactionsForAudit
+            managerReports = managerReportsForAudit,
+            managerTransactionsMap = managerTransactionsMapForAudit
         )
     }
 
@@ -528,8 +551,6 @@ fun FullDayCalculatorScreen(
 
                                 HorizontalDivider(color = Color.Red.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    DeductionRow("Cash Submitted", aggregateData.cashSubmitted)
-                                    DeductionRow("Cash Balance", aggregateData.actualCashCollected)
                                     DeductionRow("TOTAL CASH", aggregateData.cashSubmitted + aggregateData.actualCashCollected, isBold = true)
                                 }
                                 
@@ -603,10 +624,9 @@ fun FullDayCalculatorScreen(
             }
 
             // 6. Manager's Report Integration
-            item {
-                if (aggregateData.managerReport != null) {
-                    ManagerReconciliationCard(aggregateData.managerReport!!, aggregateData.managerTransactions)
-                }
+            items(aggregateData.managerReports, key = { it.reportId.ifEmpty { it.timestamp.toString() } }) { mr ->
+                val txs = aggregateData.managerTransactionsMap[mr.reportId] ?: emptyList()
+                ManagerReconciliationCard(mr, txs)
             }
 
             item {
@@ -840,9 +860,7 @@ private fun buildDetailedHtml(pumpName: String, date: String, nozzleStats: List<
 
         ${if (totals.totalShortage > 0) "<tr><td>- Shortage</td><td class='num'>-₹${formatDouble(totals.totalShortage)}</td></tr>" else ""}
         
-        <tr style="background:#f8f9fa;"><td>&bull; Total Cash Submitted</td><td class='num'>-₹${formatDouble(totals.cashSubmitted)}</td></tr>
-        <tr style="background:#f8f9fa;"><td>&bull; Total Cash Balance</td><td class='num'>-₹${formatDouble(totals.actualCashCollected)}</td></tr>
-        <tr style="background:#f1f3f4; font-weight:bold;"><td>TOTAL HANDOVER CASH</td><td class='num'>-₹${formatDouble(totals.cashSubmitted + totals.actualCashCollected)}</td></tr>
+        <tr style="background:#f1f3f4; font-weight:bold;"><td>TOTAL CASH</td><td class='num'>-₹${formatDouble(totals.cashSubmitted + totals.actualCashCollected)}</td></tr>
 
         <tr class="total"><td>Total Accounted (Out)</td><td class="num">-₹${formatDouble(totalAccounted)}</td></tr>
         <tr class="total" style="background:${if(Math.abs(tallyDiff)<1.0) "#e8f5e9" else "#ffebee"}; font-size:12px; border-top: 2px solid #333;">
@@ -856,45 +874,52 @@ private fun buildDetailedHtml(pumpName: String, date: String, nozzleStats: List<
         <tr class="total"><td>TOTAL CA DIFFERENCE</td><td class="num">₹${formatDouble(totals.shortages.sumOf { it.shortage })}</td></tr>
         </tbody></table>"""
 
-    val managerSection = if (totals.managerReport != null) {
-        val mr = totals.managerReport!!
-        val txs = totals.managerTransactions
-        fun buildCatTable(title: String, list: List<com.example.database.ManagerTransaction>, sign: String, cls: String): String {
-            if (list.isEmpty()) return ""
-            return "<h3>$title</h3><table><tbody>" + list.joinToString("") { "<tr><td>${it.description ?: "-"}</td><td class='num $cls'>$sign₹${formatDouble(it.amount)}</td></tr>" } + "</tbody></table>"
-        }
-        // Formatting dynamic report date for heading
-        val fmtDate = try {
-            val inputSdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-            val outputSdf = SimpleDateFormat("dd MMMM yyyy", Locale.US)
-            inputSdf.parse(mr.date)?.let { outputSdf.format(it) } ?: mr.date
-        } catch (e: Exception) { mr.date }
+    val managerSection = if (totals.managerReports.isNotEmpty()) {
+        totals.managerReports.mapIndexed { index, mr ->
+            val txs = totals.managerTransactionsMap[mr.reportId] ?: emptyList()
+            fun buildCatTable(title: String, list: List<com.example.database.ManagerTransaction>, sign: String, cls: String): String {
+                if (list.isEmpty()) return ""
+                return "<h3>$title</h3><table><tbody>" + list.joinToString("") { "<tr><td>${it.description ?: "-"}</td><td class='num $cls'>$sign₹${formatDouble(it.amount)}</td></tr>" } + "</tbody></table>"
+            }
+            // Formatting dynamic report date for heading
+            val fmtDate = try {
+                val inputSdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+                val outputSdf = SimpleDateFormat("dd MMMM yyyy", Locale.US)
+                inputSdf.parse(mr.date)?.let { outputSdf.format(it) } ?: mr.date
+            } catch (e: Exception) { mr.date }
 
-        """<div style="page-break-before: always;"></div><h2 class="center">3. MANAGER'S REPORT ($fmtDate)</h2>
-        <h3>OPENING BALANCE</h3><table><tr><td>Carry Forward Amount</td><td class="col-num">₹${formatDouble(mr.openingBalanceUsed)}</td></tr></table>
-        <h3>SYSTEM HANDOVER ENTRIES</h3><table><tbody>
-        ${mr.dailyCashDetails?.split("; ")?.joinToString("") { try { val parts = it.split(": "); "<tr><td>${parts[0]}</td><td class='num'>${parts[1]}</td></tr>" } catch(e: Exception) { "" } } ?: ""}
-        <tr class="total"><td>TOTAL SYSTEM CASH</td><td class="num">₹${formatDouble(mr.totalFuelSalesAmount)}</td></tr></tbody></table>
-        
-        <h3>CASH ADDITIONS</h3>
-        ${buildCatTable("UDHARI RECOVERED (JAMA)", txs.filter { it.type == "MANAGER_JAMA" }, "+", "addition")}
-        ${buildCatTable("LOAN BORROWED", txs.filter { it.type in listOf("LOAN_BORROWED", "OWNER_BORROWED") }, "+", "addition")}
-        
-        <h3>CASH AVAILABLE TO DEPOSIT</h3><table><tr class="total" style="background:#e8eaf6;"><td>TOTAL AVAILABLE</td><td class="num">₹${formatDouble(mr.cashAvailableToDeposit)}</td></tr></table>
-        
-        <h3>DEDUCTIONS</h3>
-        ${buildCatTable("EXPENSES", txs.filter { it.type in listOf("MANAGER_EXPENSE", "SALON_EXPENSE") }, "-", "deduction")}
-        ${buildCatTable("UDHARI", txs.filter { it.type == "MANAGER_UDHAR" }, "-", "deduction")}
-        ${buildCatTable("LOAN CLEARED", txs.filter { it.type in listOf("LOAN_CLEARED", "OWNER_WITHDRAWAL") }, "-", "deduction")}
-        
-        <h3>NET CASH BEFORE BANK DEPOSIT</h3><table><tr class="total"><td>NET CASH</td><td class="num">₹${formatDouble(mr.expectedCashBalance)}</td></tr></table>
-        
-        <h3>BANK DEPOSIT</h3><table><tbody>
-        ${txs.filter { it.type == "BANK_DEPOSIT" }.joinToString("") { "<tr><td>${it.date}: ${it.description ?: "Bank Deposit"}</td><td class='num'>₹${formatDouble(it.amount)}</td></tr>" }}
-        <tr class="total"><td>TOTAL BANK DEPOSITED</td><td class="num">₹${formatDouble(mr.actualDepositedAmount)}</td></tr></tbody></table>
-        
-        <h3>DIFFERENCE</h3><table style="background: ${if (mr.isSettled) "#e8f5e9" else "#ffebee"};">
-        <tr class="total"><td>DIFFERENCE (${if (mr.isSettled) "SETTLED" else "CARRIED FORWARD"})</td><td class="num">₹${formatDouble(mr.manualDifference)}</td></tr></table>"""
+            val titleText = if (totals.managerReports.size > 1) {
+                "3.${index + 1} MANAGER'S REPORT #${index + 1} (${fmtDate})"
+            } else {
+                "3. MANAGER'S REPORT (${fmtDate})"
+            }
+
+            """<div style="page-break-before: always;"></div><h2 class="center">$titleText</h2>
+            <h3>OPENING BALANCE</h3><table><tr><td>Carry Forward Amount</td><td class="col-num">₹${formatDouble(mr.openingBalanceUsed)}</td></tr></table>
+            <h3>SYSTEM HANDOVER ENTRIES</h3><table><tbody>
+            ${mr.dailyCashDetails?.split("; ")?.joinToString("") { try { val parts = it.split(": "); "<tr><td>${parts[0]}</td><td class='num'>${parts[1]}</td></tr>" } catch(e: Exception) { "" } } ?: ""}
+            <tr class="total"><td>TOTAL SYSTEM CASH</td><td class="num">₹${formatDouble(mr.totalFuelSalesAmount)}</td></tr></tbody></table>
+            
+            <h3>CASH ADDITIONS</h3>
+            ${buildCatTable("UDHARI RECOVERED (JAMA)", txs.filter { it.type == "MANAGER_JAMA" }, "+", "addition")}
+            ${buildCatTable("LOAN BORROWED", txs.filter { it.type in listOf("LOAN_BORROWED", "OWNER_BORROWED") }, "+", "addition")}
+            
+            <h3>CASH AVAILABLE TO DEPOSIT</h3><table><tr class="total" style="background:#e8eaf6;"><td>TOTAL AVAILABLE</td><td class="num">₹${formatDouble(mr.cashAvailableToDeposit)}</td></tr></table>
+            
+            <h3>DEDUCTIONS</h3>
+            ${buildCatTable("EXPENSES", txs.filter { it.type in listOf("MANAGER_EXPENSE", "SALON_EXPENSE") }, "-", "deduction")}
+            ${buildCatTable("UDHARI", txs.filter { it.type == "MANAGER_UDHAR" }, "-", "deduction")}
+            ${buildCatTable("LOAN CLEARED", txs.filter { it.type in listOf("LOAN_CLEARED", "OWNER_WITHDRAWAL") }, "-", "deduction")}
+            
+            <h3>NET CASH BEFORE BANK DEPOSIT</h3><table><tr class="total"><td>NET CASH</td><td class="num">₹${formatDouble(mr.expectedCashBalance)}</td></tr></table>
+            
+            <h3>BANK DEPOSIT</h3><table><tbody>
+            ${txs.filter { it.type == "BANK_DEPOSIT" }.joinToString("") { "<tr><td>${it.date}: ${it.description ?: "Bank Deposit"}</td><td class='num'>₹${formatDouble(it.amount)}</td></tr>" }}
+            <tr class="total"><td>TOTAL BANK DEPOSITED</td><td class="num">₹${formatDouble(mr.actualDepositedAmount)}</td></tr></tbody></table>
+            
+            <h3>DIFFERENCE</h3><table style="background: ${if (mr.isSettled) "#e8f5e9" else "#ffebee"};">
+            <tr class="total"><td>DIFFERENCE (${if (mr.isSettled) "SETTLED" else "CARRIED FORWARD"})</td><td class="num">₹${formatDouble(mr.manualDifference)}</td></tr></table>"""
+        }.joinToString("")
     } else ""
 
     return """<!DOCTYPE html><html><head><style>

@@ -36,6 +36,7 @@ fun ManagerDashboardScreen(
     onNavigateToMonthlyExpensesReport: () -> Unit,
     onNavigateToMonthlyUdhariJamaReport: () -> Unit,
     onNavigateToCustomerUdhariLedgerReport: () -> Unit,
+    onNavigateToCaPerformanceReport: () -> Unit,
     onNavigateToDensityHistory: () -> Unit,
     onNavigateToPriceHistory: () -> Unit,
     adminPhone: String = "",
@@ -147,6 +148,8 @@ fun ManagerDashboardScreen(
                         ReportRowItem("Monthly Udhari Jama Report", "Track recovered outstanding credits", Icons.Default.TrendingUp, Color(0xFF10B981), onNavigateToMonthlyUdhariJamaReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Customer Credit Ledger", "Detailed party-wise credit/recovery tracking", Icons.Default.AccountBalanceWallet, Color(0xFFF59E0B), onNavigateToCustomerUdhariLedgerReport)
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        ReportRowItem("CA Performance Report", "Track sales, expenses, and tally differences by cashier", Icons.Default.PersonSearch, Color(0xFF0284C7), onNavigateToCaPerformanceReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Density History Report", "Monthly history of fuel density for all products", Icons.Default.Opacity, Color(0xFF06B6D4), onNavigateToDensityHistory)
                         HorizontalDivider(color = Color(0xFFF1F5F9))

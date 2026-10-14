@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.flow.take
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -526,7 +527,18 @@ fun CalculatorScreen(
     var tempKharchDesc by rememberSaveable { mutableStateOf("") }
     var tempKharchAmount by rememberSaveable { mutableStateOf("") }
     var kharchDropdownExpanded by remember { mutableStateOf(false) }
-    val expenseOptions = listOf("Miscellaneous", "TankerEntry", "TeaWater", "ToiletClean", "Custom...")
+    val expenseOptions = listOf("Miscellaneous", "TankerEntry", "TeaWater", "ToiletClean", "CA", "Custom...")
+    var staffListForExpense by remember { mutableStateOf(listOf<String>()) }
+    var selectedExpenseCa by rememberSaveable { mutableStateOf("") }
+    var caDropdownExpandedForExpense by remember { mutableStateOf(false) }
+
+    LaunchedEffect(adminPhone) {
+        if (adminPhone.isNotBlank()) {
+            com.example.database.SupabaseRepository.getStaffMembersFlow(adminPhone).take(1).collect { members ->
+                staffListForExpense = members.map { it.name }.distinct().sorted()
+            }
+        }
+    }
 
     // Custom Credit (Udhar)
     var udharRawString by rememberSaveable { mutableStateOf("") }
@@ -2335,7 +2347,26 @@ fun CalculatorScreen(
                             }
                         }
 
-                        if (tempKharchDesc.isEmpty() || tempKharchDesc !in expenseOptions.filter { it != "Custom..." }) {
+                        if (tempKharchDesc == "CA") {
+                            Box(modifier = Modifier.weight(1.2f)) {
+                                OutlinedTextField(
+                                    value = selectedExpenseCa.ifEmpty { "Select CA" },
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    modifier = Modifier.fillMaxWidth().height(50.dp).clickable { caDropdownExpandedForExpense = true },
+                                    trailingIcon = { IconButton(onClick = { caDropdownExpandedForExpense = true }) { Icon(Icons.Default.ArrowDropDown, null) } }
+                                )
+                                Box(modifier = Modifier.matchParentSize().clickable { caDropdownExpandedForExpense = true })
+                                DropdownMenu(expanded = caDropdownExpandedForExpense, onDismissRequest = { caDropdownExpandedForExpense = false }) {
+                                    staffListForExpense.forEach { ca ->
+                                        DropdownMenuItem(
+                                            text = { Text(ca) },
+                                            onClick = { selectedExpenseCa = ca; caDropdownExpandedForExpense = false }
+                                        )
+                                    }
+                                }
+                            }
+                        } else if (tempKharchDesc.isEmpty() || tempKharchDesc !in expenseOptions.filter { it != "Custom..." }) {
                              VoiceOutlinedTextField(
                                 value = tempKharchDesc,
                                 onValueChange = { tempKharchDesc = it },
@@ -2377,12 +2408,22 @@ fun CalculatorScreen(
 
                         IconButton(
                             onClick = {
-                                val cleanedDesc = tempKharchDesc.trim().replace("|", "").replace(";", "")
                                 val cleanedAmount = tempKharchAmount.toDoubleOrNull() ?: 0.0
+                                val cleanedDesc = if (tempKharchDesc == "CA") {
+                                    if (selectedExpenseCa.isBlank()) {
+                                        Toast.makeText(context, "Please select a CA name", Toast.LENGTH_SHORT).show()
+                                        return@IconButton
+                                    }
+                                    "CA: $selectedExpenseCa"
+                                } else {
+                                    tempKharchDesc.trim().replace("|", "").replace(";", "")
+                                }
+
                                 if (cleanedDesc.isNotEmpty() && cleanedAmount > 0.0) {
                                     val newItemString = "$cleanedDesc|$cleanedAmount"
                                     kharchRawString = if (kharchRawString.isEmpty()) newItemString else "$kharchRawString;$newItemString"
                                     tempKharchDesc = ""
+                                    selectedExpenseCa = ""
                                     tempKharchAmount = ""
                                 } else {
                                     Toast.makeText(context, "Enter details and amount", Toast.LENGTH_SHORT).show()

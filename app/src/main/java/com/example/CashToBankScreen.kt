@@ -48,17 +48,8 @@ fun CashToBankScreen(
     val coroutineScope = rememberCoroutineScope()
     val calendar = Calendar.getInstance()
 
-    var selectedDate by rememberSaveable {
-        mutableStateOf(
-            String.format(
-                Locale.US,
-                "%02d-%02d-%04d",
-                calendar.get(Calendar.DAY_OF_MONTH),
-                calendar.get(Calendar.MONTH) + 1,
-                calendar.get(Calendar.YEAR)
-            )
-        )
-    }
+    val todayDateStr = remember { SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date()) }
+    var selectedDate by rememberSaveable { mutableStateOf(todayDateStr) }
 
     // --- DATA STATE ---
     var latestReport by remember { mutableStateOf<SavedAudit?>(null) }
@@ -71,6 +62,7 @@ fun CashToBankScreen(
     var udhariNamesList by remember { mutableStateOf(listOf("Miscellaneous")) }
     var openingBalance by remember { mutableStateOf(0.0) }
     var isLoading by remember { mutableStateOf(true) }
+    var currentHandoverAuditIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // --- REFRESH DATA ---
     fun refreshData() {
@@ -86,8 +78,9 @@ fun CashToBankScreen(
             
             val upToNow = System.currentTimeMillis()
             
-            // Fetch direct handover sums from the Audit reports instead of the summary table
-            val records = SupabaseRepository.getDailyCashHandoverFromAudits(adminPhone, settledAnchorTimestamp, upToNow)
+            val anchorTimestamp = latestReportTimestamp
+            // Fetch direct handover sums from the Audit reports from last settlement anchor through yesterday
+            val (records, auditIds) = SupabaseRepository.getDailyCashHandoverFromAudits(adminPhone, anchorTimestamp, upToNow)
             val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date())
 
             withContext(Dispatchers.Main) {
@@ -95,7 +88,8 @@ fun CashToBankScreen(
                 latestReport = latest
                 lastSettledReport = lastSettled
                 // Exclude today's date cash so only cash till yesterday is displayed as available cash
-                dailyCashRecords = records.filter { it.timestamp > latestReportTimestamp && it.date != todayStr }
+                dailyCashRecords = records.filter { it.date != todayStr }
+                currentHandoverAuditIds = auditIds
                 
                 openingBalance = if (latest != null && !latest.isSettled) {
                     latest.manualDifference
@@ -111,7 +105,7 @@ fun CashToBankScreen(
     }
 
     // --- CALCULATIONS ---
-    val effectiveReportDate = dailyCashRecords.lastOrNull()?.date ?: selectedDate
+    val effectiveReportDate = todayDateStr
     
     // Formatting the date for display: dd MMMM yyyy
     val displayDate = remember(effectiveReportDate) {
@@ -205,7 +199,7 @@ fun CashToBankScreen(
                     openingBalanceUsed = openingBalance
                 )
                 
-                SupabaseRepository.saveManagerReport(report, emptyList(), emptyList())
+                SupabaseRepository.saveManagerReport(report, emptyList(), currentHandoverAuditIds)
                 
                 withContext(Dispatchers.Main) {
                     isSavingReport = false

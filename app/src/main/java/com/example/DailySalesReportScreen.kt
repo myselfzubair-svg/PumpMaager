@@ -677,35 +677,13 @@ fun DailySalesReportScreen(
                                             color = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.padding(bottom = 6.dp)
                                         )
-                                        DetailRow(
-                                            label = LanguageManager.translate("Cash Submitted (₹)", "जमा किया गया नकद (₹)"),
-                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.cashSubmitted)}"
-                                        )
-                                        DetailRow(
-                                            label = LanguageManager.translate("Actual Cash Collected (₹)", "वास्तविक नकद संग्रह (₹)"),
-                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.actualCashCollected)}"
-                                        )
-                                        DetailRow(
-                                            label = "Daily Expenses (Kharch) (₹)",
-                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.totalKharch)}",
-                                            color = Color(0xFFC62828)
-                                        )
-                                        DetailRow(
-                                            label = "Credits Given (Udhar) (₹)",
-                                            value = "₹${String.format(Locale.getDefault(), "%,.2f", dailyData.totalUdhar)}",
-                                            color = Color(0xFFE65100)
-                                        )
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(vertical = 4.dp),
-                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
-                                        )
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = LanguageManager.translate("Total Cash Collected (₹)", "कुल नकद संग्रह (₹)"),
+                                                text = LanguageManager.translate("Total Cash (₹)", "कुल नकद (₹)"),
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                                 color = MaterialTheme.colorScheme.secondary
                                             )

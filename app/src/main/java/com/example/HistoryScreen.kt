@@ -32,6 +32,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.database.HistoryViewModel
 import com.example.database.SavedAudit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +60,7 @@ fun HistoryScreen(
     var showDeleteConfirmAll by remember { mutableStateOf(false) }
     var auditToDelete by remember { mutableStateOf<SavedAudit?>(null) }
     var selectedFilterDate by remember { mutableStateOf<String?>(null) }
-    
+
     // Tracks which groups are expanded
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
@@ -304,11 +308,26 @@ fun HistoryScreen(
                                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
                                                 color = if (isManagerGroup) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                                             )
-                                            Icon(
-                                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                if (isManagerGroup && groupList.isNotEmpty()) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            printAllManagerReports(context, adminPhone, groupList)
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                        modifier = Modifier.height(28.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Print, null, modifier = Modifier.size(14.dp))
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text("Print All (${groupList.size})", fontSize = 11.sp)
+                                                    }
+                                                }
+                                                Icon(
+                                                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -325,7 +344,7 @@ fun HistoryScreen(
                                                 PdfGenerator.sharePdf(context, audit.summaryText, audit.caName, audit.date)
                                             },
                                             onPrint = {
-                                                printSavedReportHtml(context, audit)
+                                                printSavedReportHtml(context, adminPhone, audit)
                                             },
                                             onDelete = { 
                                                 if (isGroupNewest) {
@@ -840,7 +859,7 @@ fun AuditHistoryCard(
     }
 }
 
-private fun printSavedReportHtml(context: Context, audit: SavedAudit) {
+private fun printSavedReportHtml(context: Context, adminPhone: String, audit: SavedAudit) {
     val webView = android.webkit.WebView(context)
     val htmlContent = if (audit.htmlContent.trim().startsWith("<!DOCTYPE html>") || audit.htmlContent.trim().startsWith("<html")) {
         audit.htmlContent
@@ -907,13 +926,66 @@ private fun printSavedReportHtml(context: Context, audit: SavedAudit) {
         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as? android.print.PrintManager
             if (printManager != null) {
-                val jobName = "Saved_Audit_${audit.date}_${System.currentTimeMillis()}"
-                val printAdapter = webView.createPrintDocumentAdapter(jobName)
-                printManager.print("Audit Report", printAdapter, null)
+                GlobalScope.launch(Dispatchers.Main) {
+                    val pumpInfo = withContext(Dispatchers.IO) { com.example.database.SupabaseRepository.getPumpInfo(adminPhone) }
+                    val pumpName = pumpInfo?.pumpName?.replace(Regex("[^a-zA-Z0-9_-]"), "_") ?: "Pump"
+                    val jobName = "${pumpName}_${audit.date}_Report"
+                    val printAdapter = webView.createPrintDocumentAdapter(jobName)
+                    printManager.print("Audit Report", printAdapter, null)
+                }
             } else {
                 Toast.makeText(context, "Printing not supported on this device", Toast.LENGTH_SHORT).show()
             }
         }
     }
     webView.loadDataWithBaseURL(null, htmlContent, "text/html", "utf-8", null)
+}
+
+private fun printAllManagerReports(context: Context, adminPhone: String, managerReports: List<SavedAudit>) {
+    if (managerReports.isEmpty()) {
+        Toast.makeText(context, "No manager reports found to print", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val webView = android.webkit.WebView(context)
+    val htmlBuilder = StringBuilder()
+    htmlBuilder.append("""
+        <html>
+        <head>
+            <style>
+                @page { size: portrait; margin: 6mm; }
+                body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; padding: 10px; }
+                .report-container { page-break-after: always; margin-bottom: 20px; }
+                .report-container:last-child { page-break-after: avoid; }
+                pre { white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; }
+                h2 { text-align: center; border-bottom: 1.5px solid #000; padding-bottom: 3px; font-size: 13px; }
+            </style>
+        </head>
+        <body>
+    """.trimIndent())
+
+    managerReports.sortedByDescending { it.timestamp }.forEach { report ->
+        val content = if (report.htmlContent.isNotBlank()) report.htmlContent else """<div><h2>MANAGER'S REPORT (${report.date})</h2><pre>${report.summaryText.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</pre></div>"""
+        htmlBuilder.append("""<div class="report-container">$content</div>""")
+    }
+
+    htmlBuilder.append("</body></html>")
+
+    webView.webViewClient = object : android.webkit.WebViewClient() {
+        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+            val printManager = context.getSystemService(Context.PRINT_SERVICE) as? android.print.PrintManager
+            if (printManager != null) {
+                GlobalScope.launch(Dispatchers.Main) {
+                    val pumpInfo = withContext(Dispatchers.IO) { com.example.database.SupabaseRepository.getPumpInfo(adminPhone) }
+                    val pumpName = pumpInfo?.pumpName?.replace(Regex("[^a-zA-Z0-9_-]"), "_") ?: "Pump"
+                    val dateStr = managerReports.firstOrNull()?.date ?: "Report"
+                    val jobName = "${pumpName}_${dateStr}_All_Manager_Reports"
+                    val printAdapter = webView.createPrintDocumentAdapter(jobName)
+                    printManager.print("All Manager Reports", printAdapter, null)
+                }
+            } else {
+                Toast.makeText(context, "Printing not supported", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    webView.loadDataWithBaseURL(null, htmlBuilder.toString(), "text/html", "utf-8", null)
 }

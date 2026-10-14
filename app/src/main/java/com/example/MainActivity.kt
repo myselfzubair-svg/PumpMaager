@@ -62,7 +62,7 @@ enum class Screen {
   Login, Welcome, ModuleSelection, NozzleSelection, 
   Calculator, FullDayCalculator, History, ManagerDashboard, 
   DailySalesReport, TtReceiptEntry, TtEntryReport, MonthlyExpensesReport, 
-  MonthlyUdhariJamaReport, CustomerUdhariLedgerReport,
+  MonthlyUdhariJamaReport, CustomerUdhariLedgerReport, CaPerformanceReport,
   DailyPumpData, StaffManagement, DensityHistory, PriceHistory, CashToBank
 }
 
@@ -422,6 +422,7 @@ fun MainNavigationContent(
         onNavigateToMonthlyExpensesReport = { onScreenChange(Screen.MonthlyExpensesReport) },
         onNavigateToMonthlyUdhariJamaReport = { onScreenChange(Screen.MonthlyUdhariJamaReport) },
         onNavigateToCustomerUdhariLedgerReport = { onScreenChange(Screen.CustomerUdhariLedgerReport) },
+        onNavigateToCaPerformanceReport = { onScreenChange(Screen.CaPerformanceReport) },
         onNavigateToDensityHistory = { onScreenChange(Screen.DensityHistory) },
         onNavigateToPriceHistory = { onScreenChange(Screen.PriceHistory) },
         onLogout = performLogout
@@ -447,6 +448,9 @@ fun MainNavigationContent(
     }
     Screen.CustomerUdhariLedgerReport -> {
         CustomerUdhariLedgerReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
+    }
+    Screen.CaPerformanceReport -> {
+        CaPerformanceReportScreen(adminPhone = loggedInAdminPhone, onBack = { onScreenChange(Screen.ManagerDashboard) }, onLogout = performLogout)
     }
     Screen.DailyPumpData -> {
         DailyPumpDataScreen(adminPhone = loggedInAdminPhone, enteredBy = loggedInUsername, onBack = { onScreenChange(Screen.Welcome) })

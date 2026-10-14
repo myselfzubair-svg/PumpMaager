@@ -98,12 +98,14 @@ fun CustomerUdhariLedgerReportScreen(
         }
     }
 
-    // Load data from Cloud
+    // Load data from Cloud: tables, pump reports, and manager reports
     val allCreditsState = com.example.database.SupabaseRepository.getCreditEntriesFlow(adminPhone).collectAsState(initial = emptyList())
     val allRecoveriesState = com.example.database.SupabaseRepository.getRecoveryEntriesFlow(adminPhone).collectAsState(initial = emptyList())
+    val allAuditsState = com.example.database.SupabaseRepository.getAuditsFlow(adminPhone).collectAsState(initial = emptyList())
+    val allManagerTxsState = com.example.database.SupabaseRepository.getManagerTransactionsFlow(adminPhone).collectAsState(initial = emptyList())
 
-    // Parse all transactions from DB entries
-    val parsedTransactions = remember(allCreditsState.value, allRecoveriesState.value) {
+    // Parse all transactions from DB entries + station reports + manager reports
+    val parsedTransactions = remember(allCreditsState.value, allRecoveriesState.value, allAuditsState.value, allManagerTxsState.value) {
         val list = mutableListOf<Pair<String, CustomerTransaction>>() // Name to Transaction
 
         // 1. Credits Given (Udhar)
@@ -139,6 +141,83 @@ fun CustomerUdhariLedgerReportScreen(
                         description = entry.description
                     )
                 )
+            }
+        }
+
+        // 3. Station Audits (Pump reports summaries)
+        allAuditsState.value.forEach { audit ->
+            parseDetailedCredits(audit.summaryText).forEach { (party, amt) ->
+                val cleanedName = party.trim()
+                if (cleanedName.isNotEmpty()) {
+                    if (list.none { it.first.equals(cleanedName, true) && it.second.date == audit.date && it.second.type == TransactionType.GIVEN && Math.abs(it.second.amount - amt) < 0.01 }) {
+                        list.add(
+                            cleanedName to CustomerTransaction(
+                                date = audit.date,
+                                type = TransactionType.GIVEN,
+                                amount = amt,
+                                caName = audit.caName,
+                                auditId = audit.id ?: 0,
+                                timestamp = audit.timestamp,
+                                description = "Station Audit Entry"
+                            )
+                        )
+                    }
+                }
+            }
+            parseDetailedRecoveries(audit.summaryText).forEach { (party, amt) ->
+                val cleanedName = party.trim()
+                if (cleanedName.isNotEmpty()) {
+                    if (list.none { it.first.equals(cleanedName, true) && it.second.date == audit.date && it.second.type == TransactionType.RECOVERED && Math.abs(it.second.amount - amt) < 0.01 }) {
+                        list.add(
+                            cleanedName to CustomerTransaction(
+                                date = audit.date,
+                                type = TransactionType.RECOVERED,
+                                amount = amt,
+                                caName = audit.caName,
+                                auditId = audit.id ?: 0,
+                                timestamp = audit.timestamp,
+                                description = "Station Audit Recovery"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4. Manager Reports (MANAGER_UDHAR & MANAGER_JAMA)
+        allManagerTxsState.value.forEach { tx ->
+            if (tx.type == "MANAGER_UDHAR") {
+                val partyName = tx.description?.substringAfter("[")?.substringBefore("]")?.trim() ?: "Manager Udhar"
+                val desc = tx.description?.substringAfter("]")?.trim() ?: ""
+                if (partyName.isNotEmpty()) {
+                    list.add(
+                        partyName to CustomerTransaction(
+                            date = tx.date,
+                            type = TransactionType.GIVEN,
+                            amount = tx.amount,
+                            caName = "Manager",
+                            auditId = tx.id?.toInt() ?: 0,
+                            timestamp = tx.timestamp,
+                            description = desc
+                        )
+                    )
+                }
+            } else if (tx.type == "MANAGER_JAMA") {
+                val partyName = tx.description?.substringAfter("[")?.substringBefore("]")?.trim() ?: "Manager Jama"
+                val desc = tx.description?.substringAfter("]")?.trim() ?: ""
+                if (partyName.isNotEmpty()) {
+                    list.add(
+                        partyName to CustomerTransaction(
+                            date = tx.date,
+                            type = TransactionType.RECOVERED,
+                            amount = tx.amount,
+                            caName = "Manager",
+                            auditId = tx.id?.toInt() ?: 0,
+                            timestamp = tx.timestamp,
+                            description = desc
+                        )
+                    )
+                }
             }
         }
         list

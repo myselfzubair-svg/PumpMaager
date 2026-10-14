@@ -7,6 +7,8 @@ import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
 
 /**
  * Repository for Supabase operations, mirroring FirestoreRepository.
@@ -206,12 +208,16 @@ object SupabaseRepository {
     }
 
     // Direct Summation logic for Manager's Report
-    suspend fun getDailyCashHandoverFromAudits(adminPhone: String, sinceTimestamp: Long, upToTimestamp: Long): List<DailyCashRecord> = withContext(Dispatchers.IO) {
+    suspend fun getDailyCashHandoverFromAudits(
+        adminPhone: String, 
+        sinceTimestamp: Long = 0L, 
+        upToTimestamp: Long = System.currentTimeMillis()
+    ): Pair<List<DailyCashRecord>, List<String>> = withContext(Dispatchers.IO) {
         try {
             val formatted = SupabaseUserManager.formatMobileNumber(adminPhone.trim())
             val clean = adminPhone.filter { it.isDigit() }.takeLast(10)
             
-            // 1. Fetch all audits in range
+            // 1. Fetch all shift audits1124510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 using_postgrest
             val response = client.postgrest["saved_audits"].select(columns = Columns.ALL) {
                 filter {
                     or {
@@ -219,16 +225,26 @@ object SupabaseRepository {
                         eq("owner_admin_phone", clean)
                         eq("owner_admin_phone", adminPhone.trim())
                     }
-                    gt("timestamp", sinceTimestamp)
+                    if (sinceTimestamp > 0) {
+                        gt("timestamp", sinceTimestamp)
+                    }
                     lt("timestamp", upToTimestamp)
                     neq("audit_type", "Manager's Report")
                 }
             }
             
             val audits = response.decodeList<SavedAudit>()
-            
-            // 2. Group by date and calculate absolute sum for each
-            return@withContext audits.groupBy { it.date }
+            val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date())
+
+            // Eligible audits: after last settlement anchor, through yesterday (exclude today's cash), and not reconciled
+            val eligibleAudits = audits.filter { audit ->
+                audit.date != todayStr && (sinceTimestamp <= 0L || audit.timestamp > sinceTimestamp) && audit.reconciledInManagerReportId == null
+            }
+
+            val auditIds = eligibleAudits.map { it.reportId }
+
+            // 3. Group by date and calculate absolute sum (Cash Submitted + Cash Balance) for each
+            val records = eligibleAudits.groupBy { it.date }
                 .map { (date, dayAudits) ->
                     val totalForDay = dayAudits.sumOf { audit ->
                         var sub = audit.cashSubmitted
@@ -245,13 +261,15 @@ object SupabaseRepository {
                         adminPhone = formatted,
                         date = date,
                         totalCash = totalForDay,
-                        timestamp = dayAudits.maxOf { it.timestamp } // Use latest audit as anchor
+                        timestamp = dayAudits.maxOf { it.timestamp }
                     )
                 }
                 .sortedBy { it.timestamp }
+
+            Pair(records, auditIds)
         } catch (e: Exception) {
             Log.e(TAG, "Error calculating handover sums from audits", e)
-            emptyList()
+            Pair(emptyList(), emptyList())
         }
     }
 
