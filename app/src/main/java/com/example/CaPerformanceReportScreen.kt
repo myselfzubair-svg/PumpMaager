@@ -45,6 +45,7 @@ data class CaPerformanceRecord(
     val totalSalesLitres: Double,
     val productLitresDetail: String,
     val totalPayments: Double,
+    val paymentDetails: String,
     val tallyDifference: Double,
     val auditType: String
 )
@@ -93,14 +94,13 @@ fun CaPerformanceReportScreen(
 
     LaunchedEffect(allAuditsState.value, allExpensesState.value) {
         val names = (staffList + allAuditsState.value.map { it.caName } + allExpensesState.value.mapNotNull { exp ->
-            if (exp.description.startsWith("CA:", ignoreCase = true)) {
-                exp.description.substringAfter("CA:").substringBefore("-").trim()
-            } else null
+            val c = extractCaNameFromExpenseDesc(exp.description, staffList)
+            if (c.isNotBlank()) c else null
         }).filter { it.isNotBlank() && it != "Manager" && it != "All CAs" }.distinct().sorted()
         staffList = listOf("All CAs") + names
     }
 
-    val performanceRecords = remember(allAuditsState.value, allExpensesState.value, allNozzleReadingsState.value, fromDateStr, toDateStr, selectedCaFilter, reportTrigger) {
+    val performanceRecords = remember(allAuditsState.value, allExpensesState.value, allNozzleReadingsState.value, fromDateStr, toDateStr, selectedCaFilter, reportTrigger, staffList) {
         val list = mutableListOf<CaPerformanceRecord>()
         val sdfParse = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
         
@@ -119,30 +119,39 @@ fun CaPerformanceReportScreen(
             } else true
         }
 
-        // Map payments by date + caName, ONLY including entries specifically in the name of the CA ("CA: Name")
+        // Map payments and payment details by date + caName, ONLY including entries specifically in the name of the CA
         val expenseMap = mutableMapOf<String, Double>()
-        allExpensesState.value.forEach { exp ->
-            if (exp.description.startsWith("CA:", ignoreCase = true)) {
-                val expCa = exp.description.substringAfter("CA:").substringBefore("-").trim()
-                if (expCa.isNotBlank() && (selectedCaFilter == "All CAs" || expCa.equals(selectedCaFilter, ignoreCase = true))) {
-                    val expDateObj = try { sdfParse.parse(exp.date) } catch (e: Exception) { null }
-                    val inRange = if (fromDateObj != null && toDateObj != null && expDateObj != null) {
-                        !expDateObj.before(fromDateObj) && !expDateObj.after(toDateObj)
-                    } else true
+        val expenseDetailsMap = mutableMapOf<String, MutableList<String>>()
 
-                    if (inRange) {
-                        val key = "${exp.date}_${expCa.lowercase().trim()}"
-                        expenseMap[key] = (expenseMap[key] ?: 0.0) + exp.amount
+        allExpensesState.value.forEach { exp ->
+            val expCa = extractCaNameFromExpenseDesc(exp.description, staffList)
+            if (expCa.isNotBlank() && (selectedCaFilter == "All CAs" || expCa.equals(selectedCaFilter, ignoreCase = true))) {
+                val expDateObj = try { sdfParse.parse(exp.date) } catch (e: Exception) { null }
+                val inRange = if (fromDateObj != null && toDateObj != null && expDateObj != null) {
+                    !expDateObj.before(fromDateObj) && !expDateObj.after(toDateObj)
+                } else true
+
+                if (inRange) {
+                    val key = "${exp.date}_${expCa.lowercase().trim()}"
+                    expenseMap[key] = (expenseMap[key] ?: 0.0) + exp.amount
+
+                    var desc = exp.description
+                    if (desc.startsWith("CA:", ignoreCase = true)) {
+                        desc = desc.substringAfter("CA:").trim()
+                        if (desc.startsWith(expCa, ignoreCase = true)) {
+                            desc = desc.substring(expCa.length).trim(' ', '-', ':', '(')
+                        }
                     }
+                    val label = if (desc.isBlank()) "Payment" else desc
+                    val detailItem = "$label: ₹${String.format(Locale.getDefault(), "%,.1f", exp.amount)}"
+                    expenseDetailsMap.getOrPut(key) { mutableListOf() }.add(detailItem)
                 }
             }
         }
 
         val allDatesAndCas = (shiftAudits.map { it.date to it.caName } + allExpensesState.value.mapNotNull { exp ->
-            if (exp.description.startsWith("CA:", ignoreCase = true)) {
-                val c = exp.description.substringAfter("CA:").substringBefore("-").trim()
-                if (c.isNotBlank()) exp.date to c else null
-            } else null
+            val c = extractCaNameFromExpenseDesc(exp.description, staffList)
+            if (c.isNotBlank()) exp.date to c else null
         }).distinct()
 
         allDatesAndCas.forEach { (date, ca) ->
@@ -162,6 +171,8 @@ fun CaPerformanceReportScreen(
 
                 val expKey = "${date}_${ca.lowercase().trim()}"
                 val payments = expenseMap[expKey] ?: getCaPaymentsFromSummary(ca, auditsForCaDate)
+                val paymentList = expenseDetailsMap[expKey] ?: getCaPaymentListFromSummary(ca, auditsForCaDate)
+                val paymentDetails = paymentList.joinToString(", ")
 
                 // Calculate Litres for this CA and date
                 val caReadings = allNozzleReadingsState.value.filter { it.date == date && it.caName.equals(ca, true) }
@@ -188,6 +199,7 @@ fun CaPerformanceReportScreen(
                                 totalSalesLitres = totalL,
                                 productLitresDetail = detailL,
                                 totalPayments = payments,
+                                paymentDetails = paymentDetails,
                                 tallyDifference = diff,
                                 auditType = auditType
                             )
@@ -214,7 +226,8 @@ fun CaPerformanceReportScreen(
         else performanceRecords.filter {
             it.caName.contains(searchQuery, ignoreCase = true) ||
             it.date.contains(searchQuery) ||
-            it.auditType.contains(searchQuery, ignoreCase = true)
+            it.auditType.contains(searchQuery, ignoreCase = true) ||
+            it.paymentDetails.contains(searchQuery, ignoreCase = true)
         }
     }
 
@@ -542,9 +555,12 @@ fun CaPerformanceReportScreen(
                                     Text("Sales (Litres)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(record.productLitresDetail, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                                 }
-                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(0.9f)) {
+                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1.1f)) {
                                     Text("Payments", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("-₹" + String.format(Locale.getDefault(), "%,.2f", record.totalPayments), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.error)
+                                    if (record.paymentDetails.isNotBlank()) {
+                                        Text(record.paymentDetails, style = MaterialTheme.typography.labelSmall, color = Color.Gray, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(0.9f)) {
                                     Text("Difference", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -563,7 +579,25 @@ fun CaPerformanceReportScreen(
     }
 }
 
+private fun extractCaNameFromExpenseDesc(desc: String, knownCaNames: List<String>): String {
+    if (desc.isBlank()) return ""
+    if (desc.startsWith("CA:", ignoreCase = true) || desc.startsWith("CA ", ignoreCase = true)) {
+        val raw = if (desc.startsWith("CA:", ignoreCase = true)) desc.substring(3).trim() else desc.substring(2).trim()
+        val extracted = raw.split("-", "(", ":", ";", "/")[0].trim()
+        if (extracted.isNotBlank()) return extracted
+    }
+    for (ca in knownCaNames) {
+        if (ca.isNotBlank() && ca != "All CAs" && ca != "Manager") {
+            if (desc.contains(ca, ignoreCase = true)) {
+                return ca
+            }
+        }
+    }
+    return ""
+}
+
 private fun getCaPaymentsFromSummary(caName: String, audits: List<SavedAudit>): Double {
+    if (caName.isBlank()) return 0.0
     var total = 0.0
     audits.forEach { audit ->
         val text = audit.summaryText
@@ -578,7 +612,7 @@ private fun getCaPaymentsFromSummary(caName: String, audits: List<SavedAudit>): 
                 inExpensesSection = false
                 return@forEach
             }
-            if (inExpensesSection && trimmed.contains("CA: $caName", ignoreCase = true)) {
+            if (inExpensesSection && trimmed.contains(caName, ignoreCase = true)) {
                 val amtMatch = Regex("""[\d,.]+$""").find(trimmed) ?: Regex("""₹\s*([\d,.]+)""").find(trimmed)
                 if (amtMatch != null) {
                     val amtStr = (amtMatch.groupValues.getOrNull(1) ?: amtMatch.value).replace(",", "")
@@ -588,6 +622,33 @@ private fun getCaPaymentsFromSummary(caName: String, audits: List<SavedAudit>): 
         }
     }
     return total
+}
+
+private fun getCaPaymentListFromSummary(caName: String, audits: List<SavedAudit>): List<String> {
+    if (caName.isBlank()) return emptyList()
+    val list = mutableListOf<String>()
+    audits.forEach { audit ->
+        val text = audit.summaryText
+        var inExpensesSection = false
+        text.lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.contains("Expenses (Kharch):", ignoreCase = true)) {
+                inExpensesSection = true
+                return@forEach
+            }
+            if (inExpensesSection && (trimmed.startsWith("---") || trimmed.contains("Total Expenses:"))) {
+                inExpensesSection = false
+                return@forEach
+            }
+            if (inExpensesSection && trimmed.contains(caName, ignoreCase = true)) {
+                val cleanLine = trimmed.removePrefix("-").removePrefix("•").trim()
+                if (cleanLine.isNotBlank()) {
+                    list.add(cleanLine)
+                }
+            }
+        }
+    }
+    return list
 }
 
 private fun extractLitresFromAudits(summaryTexts: List<String>): Pair<Double, String> {
@@ -640,7 +701,10 @@ private fun printCaPerformancePdf(
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${r.date}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${r.caName}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${r.productLitresDetail}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; color: #c62828;">-₹${String.format(Locale.getDefault(), "%,.2f", r.totalPayments)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; color: #c62828;">
+                <b>-₹${String.format(Locale.getDefault(), "%,.2f", r.totalPayments)}</b>
+                ${if (r.paymentDetails.isNotBlank()) "<br/><small style='color:#666;'>(${r.paymentDetails})</small>" else ""}
+            </td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: ${if(r.tallyDifference < 0) "#c62828" else "#2e7d32"};">₹${String.format(Locale.getDefault(), "%,.2f", r.tallyDifference)}</td>
         </tr>
         """.trimIndent()
@@ -687,7 +751,7 @@ private fun printCaPerformancePdf(
         </html>
     """.trimIndent())
 
-    webView.loadDataWithBaseURL(null, htmlBuilder.toString(), "text/html", "UTF-8", null)
+    webView.loadDataWithBaseURL(null, htmlBuilder.toString(), "text/html", "utf-8", null)
     webView.webViewClient = object : android.webkit.WebViewClient() {
         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
             val jobName = "CA_Performance_${fromDate}_to_${toDate}"

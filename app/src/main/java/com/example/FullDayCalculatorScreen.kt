@@ -160,12 +160,10 @@ fun FullDayCalculatorScreen(
             ttEntries = com.example.database.SupabaseRepository.getTtEntriesByDate(adminPhone, selectedAuditDate)
             allRegisteredNozzles = com.example.database.SupabaseRepository.getRegisteredNozzles(adminPhone)
 
-            // Finding all Manager's Reports for the selected date:
-            // 1. By445. By445. By445.
-            val reportsByDate = allAudits.filter { it.date.trim() == selectedAuditDate.trim() && it.auditType == "Manager's Report" }
-            
+            // Finding Manager's Reports for the next calendar date (selectedAuditDate + 1 day)
+            // or linked via reconciledInManagerReportId
             val nextDayDateStr = try {
-                val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+                val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
                 val d = sdf.parse(selectedAuditDate)
                 if (d != null) {
                     val cal = Calendar.getInstance()
@@ -175,7 +173,7 @@ fun FullDayCalculatorScreen(
                 } else null
             } catch (e: Exception) { null }
 
-            val reportsByNextDay = if (reportsByDate.isEmpty() && nextDayDateStr != null) {
+            val reportsByNextDay = if (nextDayDateStr != null) {
                 allAudits.filter { it.date.trim() == nextDayDateStr.trim() && it.auditType == "Manager's Report" }
             } else emptyList()
 
@@ -184,7 +182,7 @@ fun FullDayCalculatorScreen(
                 allAudits.filter { it.reportId in linkedIds && it.auditType == "Manager's Report" }
             } else emptyList()
 
-            val foundReports = (reportsByDate + reportsByNextDay + reportsByLink)
+            val foundReports = (reportsByNextDay + reportsByLink)
                 .distinctBy { it.reportId }
                 .sortedBy { it.timestamp }
 
