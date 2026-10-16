@@ -217,6 +217,39 @@ object SupabaseRepository {
             val formatted = SupabaseUserManager.formatMobileNumber(adminPhone.trim())
             val clean = adminPhone.filter { it.isDigit() }.takeLast(10)
             
+            // 1. Get previous Manager's Report to determine last covered date
+            val latestReport = getLatestManagerReport(adminPhone)
+            val lastReportDateStr = latestReport?.date
+            
+            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+            val todayDateStr = sdf.format(Date())
+            
+            val todayCal = try {
+                Calendar.getInstance().apply {
+                    time = sdf.parse(todayDateStr) ?: Date()
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+            } catch (e: Exception) {
+                Calendar.getInstance()
+            }
+            
+            val lastReportCal = lastReportDateStr?.let { dateStr ->
+                try {
+                    sdf.parse(dateStr)?.let { d ->
+                        Calendar.getInstance().apply {
+                            time = d
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                    }
+                } catch (e: Exception) { null }
+            }
+            
             // 1. Fetch all shift audits1124510000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 using_postgrest
             val response = client.postgrest["saved_audits"].select(columns = Columns.ALL) {
                 filter {
@@ -225,28 +258,50 @@ object SupabaseRepository {
                         eq("owner_admin_phone", clean)
                         eq("owner_admin_phone", adminPhone.trim())
                     }
-                    if (sinceTimestamp > 0) {
-                        gt("timestamp", sinceTimestamp)
-                    }
                     lt("timestamp", upToTimestamp)
                     neq("audit_type", "Manager's Report")
                 }
             }
             
-            val audits = response.decodeList<SavedAudit>()
-            val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date())
+            val yesterdayCal = (todayCal.clone() as Calendar).apply {
+                add(Calendar.DAY_OF_YEAR, -1)
+            }
 
-            // Eligible audits: after last settlement anchor, through yesterday (exclude today's cash), and not reconciled
+            val audits = response.decodeList<SavedAudit>()
+
+            // Eligible audits: from the last Manager's Report date inclusive through yesterday inclusive,
+            // and not already reconciled.
             val eligibleAudits = audits.filter { audit ->
-                audit.date != todayStr && (sinceTimestamp <= 0L || audit.timestamp > sinceTimestamp) && audit.reconciledInManagerReportId == null
+                val auditDateStr = audit.date
+
+                val auditCal = try {
+                    sdf.parse(auditDateStr)?.let { d ->
+                        Calendar.getInstance().apply {
+                            time = d
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                    }
+                } catch (e: Exception) { null }
+
+                if (auditCal == null) return@filter false
+
+                val fromLastReportInclusive = lastReportCal == null || !auditCal.before(lastReportCal)
+                val upToYesterdayInclusive = auditCal.before(todayCal) || auditCal.timeInMillis == yesterdayCal.timeInMillis
+
+                fromLastReportInclusive && upToYesterdayInclusive
             }
 
             val auditIds = eligibleAudits.map { it.reportId }
 
-            // 3. Group by date and calculate absolute sum (Cash Submitted + Cash Balance) for each
+            // 3. Group by date and calculate sums for Cash Submitted and Cash Balance
             val records = eligibleAudits.groupBy { it.date }
                 .map { (date, dayAudits) ->
-                    val totalForDay = dayAudits.sumOf { audit ->
+                    var daySubmitted = 0.0
+                    var dayBalance = 0.0
+                    dayAudits.forEach { audit ->
                         var sub = audit.cashSubmitted
                         var col = audit.actualCashCollected
                         if (sub <= 0.0) sub = parseAmountFromText(audit.summaryText, """Cash Submitted:\s*-?₹?\s*([\d,.]+)""")
@@ -254,14 +309,18 @@ object SupabaseRepository {
                             col = parseAmountFromText(audit.summaryText, """CASH BALANCE:\s*-?₹?\s*([\d,.]+)""")
                             if (col <= 0.0) col = parseAmountFromText(audit.summaryText, """ACTUAL CASH COLLECTED:\s*-?₹?\s*([\d,.]+)""")
                         }
-                        sub + col
+                        daySubmitted += sub
+                        dayBalance += col
                     }
+                    val totalForDay = daySubmitted + dayBalance
                     
                     DailyCashRecord(
                         adminPhone = formatted,
                         date = date,
                         totalCash = totalForDay,
-                        timestamp = dayAudits.maxOf { it.timestamp }
+                        timestamp = dayAudits.maxOf { it.timestamp },
+                        cashSubmitted = daySubmitted,
+                        cashBalance = dayBalance
                     )
                 }
                 .sortedBy { it.timestamp }

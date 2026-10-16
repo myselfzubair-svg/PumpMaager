@@ -80,8 +80,8 @@ fun CashToBankScreen(
             
             val anchorTimestamp = latestReportTimestamp
             // Fetch direct handover sums from the Audit reports from last settlement anchor through yesterday
-            val (records, auditIds) = SupabaseRepository.getDailyCashHandoverFromAudits(adminPhone, anchorTimestamp, upToNow)
             val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date())
+            val (records, auditIds) = SupabaseRepository.getDailyCashHandoverFromAudits(adminPhone, anchorTimestamp, upToNow)
 
             withContext(Dispatchers.Main) {
                 udhariNamesList = names
@@ -247,13 +247,23 @@ fun CashToBankScreen(
                     }
                 }
 
-                // 2. System Cash (Handovers) - NO HEADING LABEL
+                // 2. System Cash (Handovers) - Date-wise Total
                 if (dailyCashRecords.isNotEmpty()) {
                     item {
                         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                             Column(Modifier.padding(16.dp)) {
+                                Text("CASH HANDOVER (Date-wise)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                Spacer(Modifier.height(8.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Date", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.DarkGray)
+                                    Text("Total Cash", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.DarkGray)
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 4.dp))
                                 dailyCashRecords.forEach { record ->
-                                    EntryRow(record.date, "", "", record.totalCash, true, onDelete = null)
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text(record.date, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        Text("₹${formatDouble(record.totalCash)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                    }
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -627,9 +637,12 @@ private fun buildManagerReportHtml(
             
             <h3>CASH HANDOVER (System Cash)</h3>
             <table>
+                <thead>
+                    <tr style="background: #f0f0f0;"><th>Date</th><th class="num">Total Cash</th></tr>
+                </thead>
                 <tbody>
                     ${dailyCash.joinToString("") { "<tr><td>${it.date}</td><td class='num'>₹${formatDouble(it.totalCash)}</td></tr>" }}
-                    <tr class="total"><td>TOTAL SYSTEM CASH</td><td class="num">₹${formatDouble(dailyCash.sumOf { it.totalCash })}</td></tr>
+                    <tr class="total"><td>TOTAL SYSTEM CASH</td><td class='num'>₹${formatDouble(dailyCash.sumOf { it.totalCash })}</td></tr>
                 </tbody>
             </table>
             
