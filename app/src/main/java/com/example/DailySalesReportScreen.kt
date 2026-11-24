@@ -148,7 +148,7 @@ fun DailySalesReportScreen(
                     val firstOp = sorted.firstOrNull()?.first ?: 0.0
                     val lastCl = sorted.lastOrNull()?.second ?: 0.0
                     val nozzleTesting = testingMap[label] ?: 0.0
-                    val netSales = (lastCl - firstOp).coerceAtLeast(0.0)
+                    val netSales = ((lastCl - firstOp) - nozzleTesting).coerceAtLeast(0.0)
                     productSalesLitres += netSales
                     productTestingLitres += nozzleTesting
                     productTotalOpening += firstOp
@@ -1067,24 +1067,22 @@ private fun printMonthlySalesReportPdf(
         """.trimIndent())
 
         // PAGE 2 FOR PRODUCT: MONTHLY PURCHASE SHEET
+        val monthNames = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+        val monthIndex = monthNames.indexOf(monthName)
+
         val isMs = isSameProduct(product, "MS") || isSameProduct(product, "Petrol")
         val isHsd = isSameProduct(product, "HSD") || isSameProduct(product, "Diesel")
 
         val productTtItems = mutableListOf<TtPurchaseLineItem>()
         allTtEntries.forEach { entry ->
-            val monthStr = String.format(Locale.US, "%02d", monthName.let {
-                val monthNames = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
-                monthNames.indexOf(it) + 1
-            })
-            val suffix = "-$monthStr-$year"
-            if (entry.date.endsWith(suffix) || entry.date.endsWith("-$year")) {
+            if (isDateInMonthAndYear(entry.date, monthIndex, year)) {
                 if (isMs) {
                     val qty = if (entry.msInvoiceQuantity > 0) entry.msInvoiceQuantity 
                              else if (entry.msPostDecantationStock > 0) (entry.msPostDecantationStock - entry.msPreDecantationStock).coerceAtLeast(0.0) 
                              else 0.0
                     val amt = if (entry.msInvoiceAmount > 0) entry.msInvoiceAmount else if (qty > 0) entry.invoiceAmount else 0.0
                     if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
-                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.msShortage, amt, entry.timestamp))
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, 0.0, amt, entry.timestamp))
                     }
                 } else if (isHsd) {
                     val qty = if (entry.hsdInvoiceQuantity > 0) entry.hsdInvoiceQuantity 
@@ -1092,13 +1090,13 @@ private fun printMonthlySalesReportPdf(
                              else 0.0
                     val amt = if (entry.hsdInvoiceAmount > 0) entry.hsdInvoiceAmount else if (qty > 0) entry.invoiceAmount else 0.0
                     if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
-                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.hsdShortage, amt, entry.timestamp))
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, 0.0, amt, entry.timestamp))
                     }
                 } else if (entry.extraProductName != null && isSameProduct(product, entry.extraProductName)) {
                     val qty = entry.extraInvoiceQuantity
                     val amt = entry.extraInvoiceAmount
                     if (qty > 0 || amt > 0 || entry.invoiceNumber.isNotBlank()) {
-                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, entry.extraShortage, amt, entry.timestamp))
+                        productTtItems.add(TtPurchaseLineItem(entry.date, product, entry.invoiceNumber, entry.ttNumber, qty, 0.0, amt, entry.timestamp))
                     }
                 } else {
                     if (entry.invoiceAmount > 0 || entry.invoiceNumber.isNotBlank()) {
@@ -1109,17 +1107,15 @@ private fun printMonthlySalesReportPdf(
         }
 
         val purchaseRowsHtml = if (productTtItems.isEmpty()) {
-            "<tr><td colspan='5' style='text-align: center; color: #888; padding: 12px;'>No purchase records for $product during $monthName $year</td></tr>"
+            "<tr><td colspan='4' style='text-align: center; color: #888; padding: 12px;'>No purchase records for $product during $monthName $year</td></tr>"
         } else {
             productTtItems.joinToString("") { item ->
                 val qtyStr = if (item.quantityLitres > 0) "${String.format(Locale.getDefault(), "%,.1f", item.quantityLitres)} L" else "--"
-                val shortStr = if (item.shortageLitres != 0.0) "${formatDouble(item.shortageLitres)}" else "--"
                 val amtStr = if (item.invoiceAmount > 0) "₹${String.format(Locale.getDefault(), "%,.2f", item.invoiceAmount)}" else "--"
                 """
                 <tr>
                     <td style="padding: 8px; font-weight: bold;">${item.date}</td>
                     <td class="num" style="font-weight: bold; color: #1a5f7a;">$qtyStr</td>
-                    <td class="num" style="color: ${if (item.shortageLitres > 0) "#c62828" else "#2e7d32"}; font-weight: bold;">$shortStr</td>
                     <td style="text-align: center;">${item.invoiceNumber.ifEmpty { "--" }}</td>
                     <td class="num" style="font-weight: bold; color: #2e7d32;">$amtStr</td>
                 </tr>
@@ -1128,7 +1124,6 @@ private fun printMonthlySalesReportPdf(
         }
 
         val totalPurchaseQty = productTtItems.sumOf { it.quantityLitres }
-        val totalPurchaseShort = productTtItems.sumOf { it.shortageLitres }
         val totalPurchaseAmt = productTtItems.sumOf { it.invoiceAmount }
 
         htmlBuilder.append("""
@@ -1144,10 +1139,9 @@ private fun printMonthlySalesReportPdf(
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 15%;">Date</th>
-                            <th style="width: 20%; text-align: right;">Product Quantity (L)</th>
-                            <th style="width: 15%; text-align: right;">Shortage (L)</th>
-                            <th style="width: 20%; text-align: center;">Invoice Number</th>
+                            <th style="width: 20%;">Date</th>
+                            <th style="width: 25%; text-align: right;">Product Quantity (L)</th>
+                            <th style="width: 25%; text-align: center;">Invoice Number</th>
                             <th style="width: 30%; text-align: right;">Invoice Amount (₹)</th>
                         </tr>
                     </thead>
@@ -1156,7 +1150,6 @@ private fun printMonthlySalesReportPdf(
                         <tr class="total-row" style="background-color: #e8f5e9;">
                             <td style="color: #2e7d32;">MONTHLY TOTALS</td>
                             <td class="num" style="font-size: 11px; font-weight: bold; color: #1a5f7a;">${if (totalPurchaseQty > 0) String.format(Locale.getDefault(), "%,.1f", totalPurchaseQty) + " L" else "--"}</td>
-                            <td class="num" style="font-size: 11px; font-weight: bold; color: ${if (totalPurchaseShort > 0) "#c62828" else "#2e7d32"};">${if (totalPurchaseShort != 0.0) formatDouble(totalPurchaseShort) else "--"}</td>
                             <td style="text-align: center;">&mdash;</td>
                             <td class="num" style="font-size: 11px; font-weight: bold; color: #2e7d32;">₹${String.format(Locale.getDefault(), "%,.2f", totalPurchaseAmt)}</td>
                         </tr>

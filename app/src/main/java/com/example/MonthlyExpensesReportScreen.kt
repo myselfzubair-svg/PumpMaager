@@ -618,80 +618,6 @@ fun MonthlyExpensesReportScreen(
                         }
                     }
                 }
-
-                // DETAILED EXPENSES LIST HEADER
-                item {
-                    Text(
-                        text = LanguageManager.translate("DETAILED EXPENSE ENTRIES", "विस्तृत खर्च प्रविष्टियां"),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                // LIST ENTRIES
-                items(filteredExpenses) { expense ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("expense_item_${expense.auditId}"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(
-                                                color = MaterialTheme.colorScheme.primaryContainer,
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = expense.date,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                    Text(
-                                        text = "By: ${expense.caName}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Text(
-                                    text = expense.description,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            Text(
-                                text = "₹" + String.format(Locale.getDefault(), "%,.2f", expense.amount),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(start = 12.dp)
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -755,17 +681,6 @@ private fun printMonthlyExpensesReportPdf(
             <td style="padding: 8px; border-bottom: 1px solid #ddd; font-weight: bold;">${summary.name}</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold; color: #c62828;">₹${String.format(Locale.getDefault(), "%,.2f", summary.total)}</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">${String.format(Locale.getDefault(), "%.1f", summary.percentage * 100)}%</td>
-        </tr>
-        """.trimIndent()
-    }
-
-    val detailedRowsHtml = expenses.joinToString("") { expense ->
-        """
-        <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #eee;">${expense.date}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee;">${expense.caName}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${expense.description}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold; color: #c62828;">-₹${String.format(Locale.getDefault(), "%,.2f", expense.amount)}</td>
         </tr>
         """.trimIndent()
     }
@@ -875,24 +790,10 @@ private fun printMonthlyExpensesReportPdf(
                 </thead>
                 <tbody>
                     $breakdownRowsHtml
-                </tbody>
-            </table>
-
-            <div class="section-title">CHRONOLOGICAL EXPENSE ENTRIES</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 15%;">Date</th>
-                        <th style="width: 25%;">Cashier (CA)</th>
-                        <th style="width: 40%;">Description / Purpose</th>
-                        <th style="text-align: right; width: 20%;">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    $detailedRowsHtml
                     <tr style="background-color: #f9f9f9; font-weight: bold; border-top: 2px solid #ddd;">
-                        <td colspan="3" style="padding: 8px;">GRAND TOTAL</td>
+                        <td style="padding: 8px;">GRAND TOTAL</td>
                         <td style="padding: 8px; text-align: right; color: #c62828;">-₹${String.format(Locale.getDefault(), "%,.2f", totalExpenses)}</td>
+                        <td style="padding: 8px; text-align: right;">100.0%</td>
                     </tr>
                 </tbody>
             </table>

@@ -94,8 +94,8 @@ fun DailyPumpDataScreen(
             
             products = allProducts
 
-            // Fetch existing data for selected date
-            val existingData = SupabaseRepository.getDailyPumpData(adminPhone, selectedDate)
+            // Fetch existing data for selected date (strict, no past fallback)
+            val existingData = SupabaseRepository.getDailyPumpDataStrict(adminPhone, selectedDate)
             
             // Clear maps first
             densityInputs.clear()

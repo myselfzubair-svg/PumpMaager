@@ -23,10 +23,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.database.SavedAudit
 import com.example.database.DailyPumpData
 import com.example.database.SupabaseRepository
@@ -74,8 +78,9 @@ fun WelcomeScreen(
 
     var dailyPumpDataList by remember { mutableStateOf<List<DailyPumpData>>(emptyList()) }
     var bankableCash by remember { mutableStateOf(0.0) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
-    LaunchedEffect(adminPhone, todayDate) {
+    fun loadData() {
         coroutineScope.launch(Dispatchers.IO) {
             val data = SupabaseRepository.getDailyPumpData(adminPhone, todayDate)
             
@@ -98,6 +103,22 @@ fun WelcomeScreen(
                 dailyPumpDataList = data
                 bankableCash = (inflow - outflow).coerceAtLeast(0.0)
             }
+        }
+    }
+
+    LaunchedEffect(adminPhone, todayDate) {
+        loadData()
+    }
+
+    DisposableEffect(lifecycleOwner, adminPhone, todayDate) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                loadData()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 

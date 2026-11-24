@@ -123,10 +123,7 @@ fun TtEntryReportScreen(
 
     // Filtered entries for the selected month and year
     val filteredEntries = remember(allEntries, selectedMonth, selectedYear) {
-        val monthStr = String.format(Locale.US, "%02d", selectedMonth + 1)
-        val yearStr = selectedYear.toString()
-        val suffix = "-$monthStr-$yearStr"
-        allEntries.filter { it.date.endsWith(suffix) }
+        allEntries.filter { isDateInMonthAndYear(it.date, selectedMonth, selectedYear) }
     }
 
     // Line items for the selected product
@@ -609,11 +606,10 @@ fun TtEntryReportScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                           ) {
-                                Text("Date", modifier = Modifier.weight(0.9f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                                Text("Qty", modifier = Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
-                                Text("Short", modifier = Modifier.weight(0.7f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
-                                Text("Invoice No.", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
-                                Text("Amt", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
+                                Text("Date", modifier = Modifier.weight(1.0f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                                Text("Qty", modifier = Modifier.weight(1.0f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
+                                Text("Invoice No.", modifier = Modifier.weight(1.4f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
+                                Text("Amt", modifier = Modifier.weight(1.4f), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.End)
                             }
                         }
                     }
@@ -635,30 +631,22 @@ fun TtEntryReportScreen(
                             ) {
                                 Text(
                                     text = item.date,
-                                    modifier = Modifier.weight(0.9f),
+                                    modifier = Modifier.weight(1.0f),
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
 
                                 Text(
                                     text = if (item.quantityLitres > 0) "${String.format(Locale.US, "%,.1f", item.quantityLitres)} L" else "--",
-                                    modifier = Modifier.weight(0.8f),
+                                    modifier = Modifier.weight(1.0f),
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary,
                                     textAlign = TextAlign.End
                                 )
 
                                 Text(
-                                    text = if (item.shortageLitres != 0.0) "${formatDouble(item.shortageLitres)}" else "--",
-                                    modifier = Modifier.weight(0.7f),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (item.shortageLitres > 0) Color.Red else Color(0xFF2E7D32),
-                                    textAlign = TextAlign.End
-                                )
-
-                                Text(
                                     text = item.invoiceNumber.ifEmpty { "--" },
-                                    modifier = Modifier.weight(1.2f),
+                                    modifier = Modifier.weight(1.4f),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
@@ -666,7 +654,7 @@ fun TtEntryReportScreen(
 
                                 Text(
                                     text = if (item.invoiceAmount > 0) "₹${String.format(Locale.US, "%,.2f", item.invoiceAmount)}" else "--",
-                                    modifier = Modifier.weight(1.2f),
+                                    modifier = Modifier.weight(1.4f),
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = Color(0xFF2E7D32),
                                     textAlign = TextAlign.End
@@ -689,10 +677,10 @@ fun TtEntryReportScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("TOTALS", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = Color(0xFF2E7D32))
-                                Text("${String.format(Locale.US, "%,.1f", totalProductQuantity)} L", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.End)
-                                Text("--", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-                                Text("₹${String.format(Locale.US, "%,.2f", totalProductInvoiceAmount)}", modifier = Modifier.weight(1.3f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = Color(0xFF2E7D32), textAlign = TextAlign.End)
+                                Text("TOTALS", modifier = Modifier.weight(1.0f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = Color(0xFF2E7D32))
+                                Text("${String.format(Locale.US, "%,.1f", totalProductQuantity)} L", modifier = Modifier.weight(1.0f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.End)
+                                Text("--", modifier = Modifier.weight(1.4f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                                Text("₹${String.format(Locale.US, "%,.2f", totalProductInvoiceAmount)}", modifier = Modifier.weight(1.4f), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Black), color = Color(0xFF2E7D32), textAlign = TextAlign.End)
                             }
                         }
                     }

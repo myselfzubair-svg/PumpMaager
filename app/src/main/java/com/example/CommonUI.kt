@@ -67,3 +67,24 @@ fun isSameProduct(name1: String, name2: String): Boolean {
 fun generateProductId(productName: String): String {
     return "PROD_${productName.trim().uppercase().replace(" ", "_")}"
 }
+
+fun isDateInMonthAndYear(dateStr: String, targetMonth: Int, targetYear: Int): Boolean {
+    val formats = listOf(
+        java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US),
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US),
+        java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.US),
+        java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.US)
+    )
+    for (fmt in formats) {
+        try {
+            val d = fmt.parse(dateStr)
+            if (d != null) {
+                val cal = java.util.Calendar.getInstance().apply { time = d }
+                return cal.get(java.util.Calendar.MONTH) == targetMonth && cal.get(java.util.Calendar.YEAR) == targetYear
+            }
+        } catch (_: Exception) {}
+    }
+    val monthStr = String.format(java.util.Locale.US, "%02d", targetMonth + 1)
+    val yearStr = targetYear.toString()
+    return dateStr.contains("-$monthStr-$yearStr") || dateStr.contains("/$monthStr/$yearStr") || dateStr.endsWith("-$yearStr")
+}

@@ -300,6 +300,37 @@ fun TtReceiptEntryScreen(
                                     )
 
                                     SupabaseRepository.saveTtEntry(entry)
+
+                                    // Save in Saved Reports as an Invoice Report
+                                    val reportId = UUID.randomUUID().toString()
+                                    val summaryText = "Invoice No: ${invoiceNumber.trim()} | TT No: ${ttNumber.trim()} | Amount: ₹${formatDouble(totalInvoiceAmount)}"
+                                    val htmlContent = """
+                                        <html><head><style>body{font-family:sans-serif;font-size:12px;}</style></head>
+                                        <body>
+                                            <h2>TT INVOICE REPORT</h2>
+                                            <p><b>Date:</b> $selectedDate | <b>Invoice No:</b> ${invoiceNumber.trim()} | <b>TT No:</b> ${ttNumber.trim()}</p>
+                                            <h3>DETAILS</h3>
+                                            <table>
+                                                <tr><td>Total Invoice Amount</td><td>₹${formatDouble(totalInvoiceAmount)}</td></tr>
+                                                ${productStates.joinToString("") { ps -> "<tr><td>${ps.name}</td><td>Qty: ${ps.quantity}L, Amt: ₹${ps.amount}</td></tr>" }}
+                                            </table>
+                                        </body></html>
+                                    """.trimIndent()
+
+                                    val savedAudit = com.example.database.SavedAudit(
+                                        ownerAdminPhone = adminPhone,
+                                        date = selectedDate,
+                                        caName = "Tanker Receipt",
+                                        meterNo = "Invoice: ${invoiceNumber.trim()}",
+                                        auditType = "TT Invoice Report",
+                                        summaryText = summaryText,
+                                        htmlContent = htmlContent,
+                                        timestamp = System.currentTimeMillis(),
+                                        reportId = reportId,
+                                        totalFuelSalesAmount = totalInvoiceAmount
+                                    )
+                                    SupabaseRepository.saveAudit(savedAudit)
+
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(context, "TT Receipt saved successfully!", Toast.LENGTH_SHORT).show()
                                         onBack()
