@@ -230,9 +230,19 @@ fun HistoryScreen(
 
                     val groupedAudits = remember(filteredAudits) {
                         filteredAudits.groupBy { audit ->
-                            audit.meterNo.trim().ifEmpty { "N/A" }
+                            val meter = audit.meterNo.trim()
+                            val type = audit.auditType.trim()
+                            if (type.contains("TT", ignoreCase = true) || meter.contains("TT", ignoreCase = true) || meter.contains("Invoice", ignoreCase = true) || type.contains("Invoice", ignoreCase = true)) {
+                                "TT Receipts"
+                            } else if (type == "Manager's Report" || meter == "Manager Report") {
+                                "Manager Report"
+                            } else {
+                                meter.ifEmpty { "N/A" }
+                            }
                         }.toSortedMap { a, b ->
-                            if (a == "Manager Report" && b != "Manager Report") 1
+                            if (a == "TT Receipts" && b != "TT Receipts") -1
+                            else if (a != "TT Receipts" && b == "TT Receipts") 1
+                            else if (a == "Manager Report" && b != "Manager Report") 1
                             else if (a != "Manager Report" && b == "Manager Report") -1
                             else {
                                 val aInt = a.filter { it.isDigit() }.toIntOrNull()
@@ -281,7 +291,6 @@ fun HistoryScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             
-                            
                             groupedAudits.forEach { entry ->
                                 val meterNo = entry.key
                                 val groupList = entry.value
@@ -291,8 +300,11 @@ fun HistoryScreen(
 
                                 item {
                                     val isManagerGroup = meterNo == "Manager Report"
+                                    val isTtGroup = meterNo == "TT Receipts"
                                     Surface(
-                                        color = if (isManagerGroup) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                        color = if (isTtGroup) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
+                                                else if (isManagerGroup) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) 
+                                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.clickable { 
                                             expandedGroups[meterNo] = !isExpanded 
@@ -304,9 +316,17 @@ fun HistoryScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = if (isManagerGroup) "Manager Report" else "Nozzle No: $meterNo",
+                                                text = when {
+                                                    isTtGroup -> "TT Receipts (${groupList.size})"
+                                                    isManagerGroup -> "Manager Report"
+                                                    else -> "Nozzle No: $meterNo"
+                                                },
                                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
-                                                color = if (isManagerGroup) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                                                color = when {
+                                                    isTtGroup -> MaterialTheme.colorScheme.tertiary
+                                                    isManagerGroup -> MaterialTheme.colorScheme.secondary
+                                                    else -> MaterialTheme.colorScheme.primary
+                                                }
                                             )
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 if (isManagerGroup && groupList.isNotEmpty()) {

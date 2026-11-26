@@ -19,8 +19,8 @@ android {
     applicationId = "com.mypump.cal"
     minSdk = 24
     targetSdk = 36
-    versionCode = 17
-    versionName = "17.0"
+    versionCode = 22
+    versionName = "22.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

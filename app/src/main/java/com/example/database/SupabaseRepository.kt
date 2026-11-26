@@ -435,63 +435,8 @@ object SupabaseRepository {
         }
     }
 
-    // --- Daily Pump Data ---
-    suspend fun getDailyPumpDataStrict(adminPhone: String, date: String): List<DailyPumpData> = withContext(Dispatchers.IO) {
-        try {
-            val resolvedPhone = adminPhone.trim()
-            val formatted = SupabaseUserManager.formatMobileNumber(resolvedPhone)
-            val clean = resolvedPhone.filter { it.isDigit() }.takeLast(10)
-            val indiaPhone = if (clean.length == 10) "+91$clean" else ""
-
-            val response = client.postgrest["daily_sales"].select(columns = Columns.ALL) {
-                filter {
-                    if (resolvedPhone.isNotBlank()) {
-                        or {
-                            eq("admin_phone", formatted)
-                            eq("admin_phone", clean)
-                            eq("admin_phone", resolvedPhone)
-                            if (indiaPhone.isNotBlank()) eq("admin_phone", indiaPhone)
-                        }
-                    }
-                    eq("date", date)
-                }
-            }
-            val list = response.decodeList<DailyPumpData>()
-            if (list.isNotEmpty()) return@withContext list
-
-            val configMap = getDailyConfig(resolvedPhone, date)
-            if (configMap.isNotEmpty()) {
-                val results = mutableListOf<DailyPumpData>()
-                val msDensity = configMap["density_ms"]?.toDoubleOrNull() ?: 0.0
-                val msRate = configMap["rate_ms"]?.toDoubleOrNull() ?: 0.0
-                val msStock = configMap["stock_ms"]?.toDoubleOrNull() ?: 0.0
-                if (msDensity > 0.0 || msRate > 0.0 || msStock > 0.0) {
-                    results.add(DailyPumpData(adminPhone = formatted, date = date, productName = "MS", productId = "PROD_MS", density = msDensity, rate = msRate, openingStock = msStock, enteredBy = "Admin"))
-                }
-                val hsdDensity = configMap["density_hsd"]?.toDoubleOrNull() ?: 0.0
-                val hsdRate = configMap["rate_hsd"]?.toDoubleOrNull() ?: 0.0
-                val hsdStock = configMap["stock_hsd"]?.toDoubleOrNull() ?: 0.0
-                if (hsdDensity > 0.0 || hsdRate > 0.0 || hsdStock > 0.0) {
-                    results.add(DailyPumpData(adminPhone = formatted, date = date, productName = "HSD", productId = "PROD_HSD", density = hsdDensity, rate = hsdRate, openingStock = hsdStock, enteredBy = "Admin"))
-                }
-                if (results.isNotEmpty()) return@withContext results
-            }
-
-            try {
-                val prefs = MyApplication.instance.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-                val cachedJson = prefs.getString("daily_pump_data_$date", null)
-                if (!cachedJson.isNullOrBlank()) {
-                    val cachedList = Json.decodeFromString(ListSerializer(DailyPumpData.serializer()), cachedJson)
-                    if (cachedList.isNotEmpty()) return@withContext cachedList
-                }
-            } catch (_: Exception) {}
-
-            emptyList()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching strict daily pump data", e)
-            emptyList()
-        }
-    }
+    // --- Daily Pump Data (Strict per date, no past fallbacks) ---
+    suspend fun getDailyPumpDataStrict(adminPhone: String, date: String): List<DailyPumpData> = getDailyPumpData(adminPhone, date)
 
     suspend fun getDailyPumpData(adminPhone: String, date: String): List<DailyPumpData> = withContext(Dispatchers.IO) {
         val phoneToUse = adminPhone.trim().ifBlank { "Admin" }
@@ -501,7 +446,7 @@ object SupabaseRepository {
             val clean = resolvedPhone.filter { it.isDigit() }.takeLast(10)
             val indiaPhone = if (clean.length == 10) "+91$clean" else ""
 
-            // 1. Try querying daily_sales table for the date
+            // 1. Try querying daily_sales table strictly for the requested date
             val response = client.postgrest["daily_sales"].select(columns = Columns.ALL) {
                 filter {
                     if (resolvedPhone.isNotBlank()) {
@@ -520,12 +465,12 @@ object SupabaseRepository {
                 try {
                     val prefs = MyApplication.instance.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
                     val jsonStr = Json.encodeToString(ListSerializer(DailyPumpData.serializer()), list)
-                    prefs.edit().putString("daily_pump_data_$date", jsonStr).putString("latest_daily_pump_data", jsonStr).apply()
+                    prefs.edit().putString("daily_pump_data_$date", jsonStr).apply()
                 } catch (_: Exception) {}
                 return@withContext list
             }
 
-            // 2. Try querying daily_configs table for the date
+            // 2. Try querying daily_configs table strictly for the requested date
             val configMap = getDailyConfig(resolvedPhone, date)
             if (configMap.isNotEmpty()) {
                 val results = mutableListOf<DailyPumpData>()
@@ -547,10 +492,10 @@ object SupabaseRepository {
                 }
             }
 
-            // 3. Fallback to Local SharedPreferences Cache
+            // 3. Fallback to Local SharedPreferences Cache strictly for the requested date
             try {
                 val prefs = MyApplication.instance.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-                val cachedJson = prefs.getString("daily_pump_data_$date", null) ?: prefs.getString("latest_daily_pump_data", null)
+                val cachedJson = prefs.getString("daily_pump_data_$date", null)
                 if (!cachedJson.isNullOrBlank()) {
                     val cachedList = Json.decodeFromString(ListSerializer(DailyPumpData.serializer()), cachedJson)
                     if (cachedList.isNotEmpty()) {
@@ -559,58 +504,12 @@ object SupabaseRepository {
                 }
             } catch (_: Exception) {}
 
-            // 4. Fallback: fetch latest available daily pump data from daily_sales across all past dates
-            val fallbackResponse = client.postgrest["daily_sales"].select(columns = Columns.ALL) {
-                filter {
-                    if (resolvedPhone.isNotBlank()) {
-                        or {
-                            eq("admin_phone", formatted)
-                            eq("admin_phone", clean)
-                            eq("admin_phone", resolvedPhone)
-                            if (indiaPhone.isNotBlank()) eq("admin_phone", indiaPhone)
-                        }
-                    }
-                }
-            }
-            val allPast = fallbackResponse.decodeList<DailyPumpData>()
-            if (allPast.isNotEmpty()) {
-                val res = allPast.groupBy { it.productName.trim().lowercase() }
-                    .map { (_, records) -> records.maxByOrNull { it.timestamp }!! }
-                if (res.isNotEmpty()) return@withContext res
-            }
-
-            // 5. Fallback: fetch latest available daily_configs across all past dates
-            val allConfigs = getAllDailyConfigs(resolvedPhone)
-            if (allConfigs.isNotEmpty()) {
-                val latestConfig = allConfigs.entries.maxByOrNull { it.key }?.value ?: emptyMap()
-                val results = mutableListOf<DailyPumpData>()
-                val msDensity = latestConfig["density_ms"]?.toDoubleOrNull() ?: 0.0
-                val msRate = latestConfig["rate_ms"]?.toDoubleOrNull() ?: 0.0
-                val msStock = latestConfig["stock_ms"]?.toDoubleOrNull() ?: 0.0
-                if (msDensity > 0.0 || msRate > 0.0 || msStock > 0.0) {
-                    results.add(DailyPumpData(adminPhone = formatted, date = date, productName = "MS", productId = "PROD_MS", density = msDensity, rate = msRate, openingStock = msStock, enteredBy = "Admin"))
-                }
-
-                val hsdDensity = latestConfig["density_hsd"]?.toDoubleOrNull() ?: 0.0
-                val hsdRate = latestConfig["rate_hsd"]?.toDoubleOrNull() ?: 0.0
-                val hsdStock = latestConfig["stock_hsd"]?.toDoubleOrNull() ?: 0.0
-                if (hsdDensity > 0.0 || hsdRate > 0.0 || hsdStock > 0.0) {
-                    results.add(DailyPumpData(adminPhone = formatted, date = date, productName = "HSD", productId = "PROD_HSD", density = hsdDensity, rate = hsdRate, openingStock = hsdStock, enteredBy = "Admin"))
-                }
-                if (results.isNotEmpty()) {
-                    return@withContext results
-                }
-            }
-
-            listOf(
-                DailyPumpData(adminPhone = phoneToUse.ifBlank { "Admin" }, date = date, productName = "MS", productId = "PROD_MS", density = 0.742, rate = 0.0, openingStock = 0.0, enteredBy = "Admin"),
-                DailyPumpData(adminPhone = phoneToUse.ifBlank { "Admin" }, date = date, productName = "HSD", productId = "PROD_HSD", density = 0.835, rate = 0.0, openingStock = 0.0, enteredBy = "Admin")
-            )
+            emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching daily pump data, checking local cache", e)
+            Log.e(TAG, "Error fetching daily pump data for date $date", e)
             try {
                 val prefs = MyApplication.instance.getSharedPreferences("pump_manager_prefs", android.content.Context.MODE_PRIVATE)
-                val cachedJson = prefs.getString("daily_pump_data_$date", null) ?: prefs.getString("latest_daily_pump_data", null)
+                val cachedJson = prefs.getString("daily_pump_data_$date", null)
                 if (!cachedJson.isNullOrBlank()) {
                     val cachedList = Json.decodeFromString(ListSerializer(DailyPumpData.serializer()), cachedJson)
                     if (cachedList.isNotEmpty()) {
@@ -618,10 +517,7 @@ object SupabaseRepository {
                     }
                 }
             } catch (_: Exception) {}
-            listOf(
-                DailyPumpData(adminPhone = phoneToUse.ifBlank { "Admin" }, date = date, productName = "MS", productId = "PROD_MS", density = 0.742, rate = 0.0, openingStock = 0.0, enteredBy = "Admin"),
-                DailyPumpData(adminPhone = phoneToUse.ifBlank { "Admin" }, date = date, productName = "HSD", productId = "PROD_HSD", density = 0.835, rate = 0.0, openingStock = 0.0, enteredBy = "Admin")
-            )
+            emptyList()
         }
     }
 

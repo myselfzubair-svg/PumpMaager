@@ -448,7 +448,7 @@ fun TtEntryReportScreen(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Tanker-Wise", fontWeight = FontWeight.Bold)
+                        Text("Combined (MS & HSD)", fontWeight = FontWeight.Bold)
                     }
                 }
             }

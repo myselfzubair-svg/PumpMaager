@@ -234,7 +234,6 @@ fun MonthlyUdhariJamaReportScreen(
                                 monthName = monthNamesEn[selectedMonth],
                                 year = selectedYear,
                                 recoveries = filteredRecoveries,
-                                categorySummaries = categorySummaries,
                                 totalRecoveries = totalRecoveries,
                                 isShare = false
                             )
@@ -254,7 +253,6 @@ fun MonthlyUdhariJamaReportScreen(
                                 monthName = monthNamesEn[selectedMonth],
                                 year = selectedYear,
                                 recoveries = filteredRecoveries,
-                                categorySummaries = categorySummaries,
                                 totalRecoveries = totalRecoveries,
                                 isShare = true
                             )
@@ -493,73 +491,6 @@ fun MonthlyUdhariJamaReportScreen(
                 )
             }
 
-            // PARTY/ACCOUNT-WISE BREAKDOWN SECTION
-            if (categorySummaries.isNotEmpty()) {
-                item {
-                    Text(
-                        text = LanguageManager.translate("ACCOUNT / PARTY-WISE BREAKDOWN", "खाता / पार्टी-वार जमा विवरण"),
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp, start = 4.dp)
-                    )
-                }
-
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            categorySummaries.forEach { summary ->
-                                Column {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = summary.name,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "₹" + String.format(Locale.getDefault(), "%,.2f", summary.total),
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = successColor
-                                            )
-                                            Text(
-                                                text = "(${String.format(Locale.getDefault(), "%.1f", summary.percentage * 100)}%)",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    LinearProgressIndicator(
-                                        progress = { summary.percentage },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(6.dp),
-                                        color = successColor,
-                                        trackColor = successColor.copy(alpha = 0.1f),
-                                        strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // CHRONOLOGICAL ENTRIES LIST
             item {
                 Text(
@@ -720,22 +651,11 @@ private fun printMonthlyUdhariJamaReportPdf(
     monthName: String,
     year: Int,
     recoveries: List<RecoveryRecord>,
-    categorySummaries: List<RecoveryCategorySummary>,
     totalRecoveries: Double,
     isShare: Boolean = false
 ) {
     val webView = android.webkit.WebView(context)
     val htmlBuilder = java.lang.StringBuilder()
-
-    val breakdownRowsHtml = categorySummaries.joinToString("") { summary ->
-        """
-        <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #ddd; font-weight: bold;">${summary.name}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-weight: bold; color: #2e7d32;">₹${String.format(Locale.getDefault(), "%,.2f", summary.total)}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">${String.format(Locale.getDefault(), "%.1f", summary.percentage * 100)}%</td>
-        </tr>
-        """.trimIndent()
-    }
 
     val detailedRowsHtml = recoveries.joinToString("") { recovery ->
         """
@@ -841,20 +761,6 @@ private fun printMonthlyUdhariJamaReportPdf(
                     </tr>
                 </table>
             </div>
-
-            <div class="section-title">ACCOUNT / PARTY-WISE UDHARI JAMA BREAKDOWN</div>
-            <table style="margin-bottom: 25px;">
-                <thead>
-                    <tr>
-                        <th style="width: 50%;">Party / Account Name</th>
-                        <th style="text-align: right; width: 30%;">Total Recovered</th>
-                        <th style="text-align: right; width: 20%;">Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    $breakdownRowsHtml
-                </tbody>
-            </table>
 
             <div class="section-title">CHRONOLOGICAL UDHARI JAMA LOGS</div>
             <table>

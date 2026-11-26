@@ -143,6 +143,8 @@ fun ManagerDashboardScreen(
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Monthly Sales Purchase Report", "View full month sales, purchases, stocks, and rates summary", Icons.Default.LocalGasStation, Color(0xFF3B82F6), onNavigateToDailySalesReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
+                        ReportRowItem("Monthly Invoice Report (MS & HSD)", "Combined tanker invoice & purchase report for MS and HSD", Icons.Default.Receipt, Color(0xFF8B5CF6), onNavigateToTtEntryReport)
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Monthly Expenses Report", "Summary and details of daily station expenses", Icons.Default.TrendingDown, Color(0xFFEF4444), onNavigateToMonthlyExpensesReport)
                         HorizontalDivider(color = Color(0xFFF1F5F9))
                         ReportRowItem("Monthly Udhari Jama Report", "Track recovered outstanding credits", Icons.Default.TrendingUp, Color(0xFF10B981), onNavigateToMonthlyUdhariJamaReport)
